@@ -267,6 +267,9 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | node `22.6` / `23.5` / `23.6` / `24.15` table | real binaries published on npm, `npx -y node@<version>` | yes, four downloads |
 | per-check cost (`107`–`1490` ms) | wall clock around each `--self-test`, Python 3.12.13, macOS | yes, the clock differs, the order does not |
 | `rc == 0` for a 1:1 embed | exact integer algebra, nothing measured | yes, no process spawned |
+| `20` for a bad invocation, in all four CLIs | subprocess exit codes for an unknown flag and for a mistyped `--bandas`, Python 3.12.13 | yes, `python -m unittest tests.test_contrato_cli` |
+| `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
+| `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around `main(["--self-test"])`; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe is 25 lines and the events are what it reports |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -288,10 +291,23 @@ Two boundaries are declared rather than measured, and no claim here crosses them
 | `2` | not measured — never reported as conforming |
 | `20` | bad invocation |
 
-All four modules have `--self-test` (their own anchors, run against synthetic fixtures, no
-filesystem or network). Three of them also take `--json` for the full receipt;
-`live_oracle` takes no such flag because its receipt is JSON unconditionally — a flag that
-would not change the output is one more thing to keep true.
+All four modules have `--self-test`, and each one runs against its own synthetic fixtures.
+Three of them — `anchor_oracle`, `subpixel_probe`, `viewport_embed` — open no file and no
+socket while doing it; that is measured with `sys.addaudithook`, not asserted, because the
+first draft of this paragraph claimed it for all four and `live_oracle` contradicted it:
+its self-test writes `fuente.ts` and `probe.mjs` into a temporary directory and runs `node`,
+which is the whole point of the module. Nineteen filesystem events outside `sys.prefix`,
+against zero in the other three.
+
+Three of them also take `--json` for the full receipt; `live_oracle` takes no such flag
+because its receipt is JSON unconditionally — a flag that would not change the output is
+one more thing to keep true.
+
+A bad invocation exits `20`, not the `2` that `argparse` uses by default, and an input file
+that does not exist exits `2` with a `NO_MEDIDO · INSUMO_FALTA` line instead of a traceback
+that would leave the process at `1`, the code that means *the port is wrong*. Both were
+wrong until this commit; `tests/test_contrato_cli.py` measures the process, not
+`main()`, because the process is what a runner reads.
 
 ## Tests
 

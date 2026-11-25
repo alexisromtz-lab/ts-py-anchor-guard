@@ -731,9 +731,9 @@ def _autotest() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    import argparse
+    from ._cli import InsumoFalta, ParserDeContrato, leer_texto, no_medido
 
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = ParserDeContrato(description=__doc__.splitlines()[0])
     parser.add_argument("--fuente", help="declaraciones TypeScript a evaluar")
     parser.add_argument("--referencia", help="JSON {nombre: valor} o {nombre: {puntos, valores}}")
     parser.add_argument("--tolerancia", type=float, default=0.0)
@@ -751,9 +751,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.fuente:
             print("uso: anchor_oracle.py --fuente F.ts --censo [--json]", file=sys.stderr)
             return RC_ARITY
-        from pathlib import Path
-
-        anclas = extraer_anclas(Path(args.fuente).read_text())
+        try:
+            anclas = extraer_anclas(leer_texto(args.fuente, "fuente"))
+        except InsumoFalta as exc:
+            return no_medido("INSUMO_FALTA", str(exc))
         if args.json:
             print(json.dumps(anclas, indent=2, sort_keys=True))
             return RC_OK
@@ -767,10 +768,13 @@ def main(argv: list[str] | None = None) -> int:
         print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]",
               file=sys.stderr)
         return RC_ARITY
-    from pathlib import Path
-
-    texto = Path(args.fuente).read_text()
-    referencia = json.loads(Path(args.referencia).read_text())
+    try:
+        texto = leer_texto(args.fuente, "fuente")
+        referencia = json.loads(leer_texto(args.referencia, "referencia"))
+    except InsumoFalta as exc:
+        return no_medido("INSUMO_FALTA", str(exc))
+    except json.JSONDecodeError as exc:
+        return no_medido("INSUMO_ILEGIBLE", f"referencia {args.referencia!r}: {exc}")
     vivos, backend, motivo = None, "estatico", ""
     if args.backend != "estatico":
         from . import live_oracle

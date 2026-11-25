@@ -162,9 +162,9 @@ def _autotest() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    import argparse
+    from ._cli import InsumoFalta, ParserDeContrato, leer_texto, no_medido
 
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = ParserDeContrato(description=__doc__.splitlines()[0])
     parser.add_argument("--fuente", help="archivo TypeScript a ejecutar")
     parser.add_argument("--referencia", help="JSON {nombre: valor o {puntos, valores}}")
     parser.add_argument("--self-test", "--autotest", dest="self_test", action="store_true")
@@ -174,8 +174,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.fuente or not args.referencia:
         print("uso: live_oracle.py --fuente F.ts --referencia ref.json", file=sys.stderr)
         return 20
-    vivos, motivo = medir(Path(args.fuente).read_text(),
-                          json.loads(Path(args.referencia).read_text()))
+    try:
+        fuente = leer_texto(args.fuente, "fuente")
+        referencia = json.loads(leer_texto(args.referencia, "referencia"))
+    except InsumoFalta as exc:
+        return no_medido("INSUMO_FALTA", str(exc))
+    except json.JSONDecodeError as exc:
+        return no_medido("INSUMO_ILEGIBLE", f"referencia {args.referencia!r}: {exc}")
+    vivos, motivo = medir(fuente, referencia)
     if motivo:
         print(f"NO_MEDIDO · {motivo}", file=sys.stderr)
         return 2

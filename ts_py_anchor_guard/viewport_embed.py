@@ -70,7 +70,12 @@ def verificar_1a1(canvas: tuple[int, int], ventana: tuple[int, int],
         try:
             rect = rect_de(canvas, ventana)
         except VentanaNoCabe as exc:
-            return {"rc": RC_DIVERGE, "ok": False, "causa": "DESBORDA", "detalle": str(exc)}
+            # Same shape as every other receipt: a consumer reads `escala` unconditionally,
+            # and a missing key is a crash in the caller, not a diagnosis. `None` is the
+            # honest value -- there is no rect, so there is no scale to report.
+            return {"rc": RC_DIVERGE, "ok": False, "causa": "DESBORDA", "detalle": str(exc),
+                    "rect": None, "canvas": list(canvas), "ventana": list(ventana),
+                    "escala": None}
     izquierda, arriba, ancho, alto = rect
     escala = (ancho_ventana / ancho, alto_ventana / alto)
     dentro = izquierda >= 0 and arriba >= 0 and izquierda + ancho <= ancho_cuadro \
@@ -110,6 +115,8 @@ def _autotest() -> int:
     desborda = verificar_1a1((1080, 1920), (1088, 960))
     igual("desborda rc", desborda["rc"], RC_DIVERGE)
     igual("desborda causa", desborda["causa"], "DESBORDA")
+    igual("desborda forma", sorted(desborda), sorted(verificar_1a1((1080, 1920), (864, 960))))
+    igual("desborda escala", desborda["escala"], None)
     try:
         rect_de((1080, 1920), (0, 960))
     except ValueError:
@@ -121,16 +128,17 @@ def _autotest() -> int:
     if fallos:
         print(f"AUTOTEST NO OK: {len(fallos)} ancla(s)", file=__import__("sys").stderr)
         return RC_DIVERGE
-    print("AUTOTEST OK: 12 anclas de encastre")
+    print("AUTOTEST OK: 14 anclas de encastre")
     return RC_OK
 
 
 def main(argv: list[str] | None = None) -> int:
-    import argparse
     import json
     import sys
 
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    from ._cli import ParserDeContrato
+
+    parser = ParserDeContrato(description=__doc__.splitlines()[0])
     parser.add_argument("--canvas", nargs=2, type=int, metavar=("A", "H"))
     parser.add_argument("--ventana", nargs=2, type=int, metavar=("A", "H"))
     parser.add_argument("--rect", nargs=4, type=int, metavar=("X", "Y", "A", "H"),
@@ -140,16 +148,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.self_test:
         return _autotest()
-    if not args.canvas or not args.ventana or args.canvas[0] <= 0 or args.ventana[0] <= 0:
+    if not args.canvas or not args.ventana:
         print("uso: viewport_embed.py --canvas A H --ventana A H [--rect X Y A H]", file=sys.stderr)
         return RC_ARITY
-    recibo = verificar_1a1(tuple(args.canvas), tuple(args.ventana),
-                          tuple(args.rect) if args.rect else None)
+    try:
+        canvas = (_entero(args.canvas[0], "canvas[0]"), _entero(args.canvas[1], "canvas[1]"))
+        ventana = (_entero(args.ventana[0], "ventana[0]"), _entero(args.ventana[1], "ventana[1]"))
+    except ValueError as exc:
+        print(f"uso: viewport_embed.py --canvas A H --ventana A H · {exc}", file=sys.stderr)
+        return RC_ARITY
+    recibo = verificar_1a1(canvas, ventana, tuple(args.rect) if args.rect else None)
     if args.json:
         print(json.dumps(recibo, indent=2, sort_keys=True))
     else:
         print(f"{'OK' if recibo['ok'] else 'DIVERGE'} · causa={recibo['causa'] or '-'} · "
-              f"escala={recibo['escala']} · {recibo['detalle'] or 'encastre 1:1'}")
+              f"escala={recibo['escala'] if recibo['escala'] is not None else '-'} · "
+              f"{recibo['detalle'] or 'encastre 1:1'}")
     return recibo["rc"]
 
 

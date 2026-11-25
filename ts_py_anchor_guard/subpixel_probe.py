@@ -185,13 +185,15 @@ def _autotest() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    import argparse
     import json
     import sys
 
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--a", help="perfil de referencia (flotantes separados por espacio)")
-    parser.add_argument("--b", help="perfil medido")
+    from ._cli import InsumoFalta, ParserDeContrato, leer_texto, no_medido
+
+    parser = ParserDeContrato(description=__doc__.splitlines()[0])
+    parser.add_argument("--a", help="archivo con el perfil de referencia (flotantes separados "
+                                    "por espacio)")
+    parser.add_argument("--b", help="archivo con el perfil medido")
     parser.add_argument("--bandas", type=int, default=6, help="bandas del ajuste de escala")
     parser.add_argument("--max-shift", type=int, default=8)
     parser.add_argument("--json", action="store_true")
@@ -202,10 +204,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.a or not args.b:
         print("uso: subpixel_probe.py --a PERFIL --b PERFIL [--bandas N] [--json]", file=sys.stderr)
         return RC_ARITY
-    from pathlib import Path
-
-    a = [float(v) for v in Path(args.a).read_text().split()]
-    b = [float(v) for v in Path(args.b).read_text().split()]
+    try:
+        a = [float(v) for v in leer_texto(args.a, "perfil A").split()]
+        b = [float(v) for v in leer_texto(args.b, "perfil B").split()]
+    except InsumoFalta as exc:
+        return no_medido("INSUMO_FALTA", str(exc))
+    except ValueError as exc:
+        return no_medido("INSUMO_ILEGIBLE", f"un perfil no es una lista de flotantes: {exc}")
     recibo = anisotropia(a, b, bandas=args.bandas, max_shift=args.max_shift)
     if recibo["rc"] == RC_OK:
         fase = fase_subpixel(a, b, max_shift=args.max_shift)
