@@ -30,3 +30,32 @@ export const pulse = (u: number) => 17.4 * (u ** 3 - 3 * u ** 2 + 3 * u);
 // Python's round() does. A port that uses round() diverges at exactly .5.
 export const halfUp = (v: number) => Math.floor(v + 0.5);
 export const snapLow = (v: number) => Math.floor(v);
+
+// The shapes that a line-based reader gets wrong, reproduced here so the regression
+// travels with the fixture: an object literal behind `as const`, an arrow whose body
+// spans lines and returns an object, a default obtained with `??`, a body that declares
+// variables of its own, and a body that is a block.
+export const BOX = { w: 1080, h: 1920 } as const;
+export const VIEW = { w: 864, h: 960 } as const;
+
+export const rectView = (y?: number) => ({
+  left: (BOX.w - VIEW.w) / 2,
+  top: y ?? (BOX.h - VIEW.h) / 2,
+  width: VIEW.w,
+  height: VIEW.h,
+});
+
+export const NEAR = [1.8, 3.0, 4.2] as const;
+
+// Declared, and deliberately outside what the reader evaluates: a `reduce` is a loop, not
+// an arithmetic expression. Comparing it must report a gap, never a pass.
+export const nearestNode = (v: number) =>
+  NEAR.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+
+// A block body with locals: `m`, `d` and `gap` must never surface as module anchors.
+export const onNode = (v: number): boolean => {
+  const m = v / 1.2;
+  const d = Math.abs(m - Math.round(m));
+  const gap = d * 1.2;
+  return gap < 0.15;
+};

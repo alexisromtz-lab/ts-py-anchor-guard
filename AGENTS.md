@@ -16,6 +16,12 @@ appear here. The fixtures are synthetic on purpose.
   verdict without a locus is not a result.
 - **`--self-test` in every module**, and it must fail if the module's claim fails. An
   assertion that cannot fail is documentation, not a test.
+- **The reader's scope is published, not implied.** `--censo` prints exactly the anchors the
+  reader sees, and a reference naming anything else is `NO_MEDIDO`. A docstring sentence
+  about what the reader refuses is a claim about code: it needs a test that runs the reader
+  against the shape it describes. A reader that silently reads 3 of 31 declarations, and a
+  reader that raises a traceback instead of reporting a gap, are the same defect — the
+  verdict is wrong and it is not visibly wrong.
 
 ## Style
 

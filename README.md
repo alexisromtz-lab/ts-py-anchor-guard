@@ -19,7 +19,7 @@ anything.
 ```console
 $ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
       --referencia fixtures/anchors.json
-CONFORME · 14 ancla(s) · 32 punto(s) · peor error absoluto 0.000e+00
+CONFORME · 21 ancla(s) · 40 punto(s) · peor error absoluto 0.000e+00
 ```
 
 ## Why these three
@@ -77,9 +77,39 @@ caller declares (`--tolerancia`), not a number quietly baked in to make a test p
 **not** Python's `round()`; a port that uses `round()` diverges at exactly `.5`, and that
 is worth finding.
 
-Anything the reader cannot evaluate honestly — object literals, block bodies, imports,
-calls into functions it does not model — is skipped and never guessed. If the reference
-names an anchor that was skipped, the verdict is `NO_MEDIDO`, not `CONFORME`.
+### What the reader reads, and what it refuses
+
+Declared scope, because a verifier that quietly reads less than you think is worse than no
+verifier:
+
+- **Module depth only.** A `const` declared inside a function body is not an anchor. Reading
+  locals as anchors promotes `m`, `x` or `k` to module constants and silently overwrites the
+  real one that shares the name.
+- **Values it can evaluate:** numeric constants, arithmetic over them, unary signs, `??`
+  against `undefined`, object and array literals (`as const` dropped), member access
+  (`BOX.w`, `PLACAS.sundial.nativo`), and single-expression arrows — including arrow bodies
+  that span lines, annotate their return type (`(v: number): boolean =>`), or return an
+  object literal to be read field by field.
+- **Calls:** `Math.floor`, `ceil`, `round`, `abs`, `sqrt`, `sign`, `min`, `max`, `pow`, and
+  the constants `Math.PI` / `Math.E`.
+- **Refused, by name:** block bodies, loops, destructuring, and calls into anything not in
+  the list above (`reduce`, `map`, helpers of the project). A refused anchor surfaces as
+  `NO_MEDIDO · ANCLA_NO_EVALUABLE` and is listed under `no_evaluables` — never a pass, and
+  never an exception. A whole object literal compared against a number is refused the same
+  way: name a field (`rectView.left`) and it compares.
+
+Precedence in the receipt: a measured divergence (`RC 1`) outranks a gap (`RC 2`), because
+a number that is wrong is a fact while a number that is unreadable is a hole in the census.
+
+`--censo` prints exactly the population the reader sees — useful to keep the acceptance set
+honest when the source grows:
+
+```
+$ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts --censo
+CANVAS_W · const · 1080
+...
+CENSO · 19 ancla(s) · las funciones con cuerpo de bloque y las variables locales no se leen
+```
 
 ```python
 from ts_py_anchor_guard import comparar

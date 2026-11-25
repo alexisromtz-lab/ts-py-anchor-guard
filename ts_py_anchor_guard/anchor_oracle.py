@@ -48,45 +48,217 @@ class AnclaDesconocida(KeyError):
 
 # --------------------------------------------------------------------- lectura
 
-_COMENTARIO = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
-_DECLARACION = re.compile(
-    r"^[ \t]*(?:export[ \t]+)?const[ \t]+([A-Za-z_$][\w$]*)[ \t]*(?::[^=\n]+)?=[ \t]*(.+?);?[ \t]*$",
-    re.M)
-_FLECHA = re.compile(r"^\(?([A-Za-z_$][\w$]*)[ \t]*(?::[^)=]+)?\)?[ \t]*=>[ \t]*(.+)$", re.S)
+_IDENT = re.compile(r"[A-Za-z_$][\w$]*")
+_ABRE, _CIERRA = set("([{"), set(")]}")
+# `as const` is a TypeScript assertion, not arithmetic: it must disappear before parsing
+# and it cannot change the value, so dropping it loses nothing.
+_AS_CONST = re.compile(r"\s+as\s+const\b")
+_CLAVE_DECLARACION = ("const", "export", "function", "class", "type", "interface",
+                      "import", "let", "enum")
+
+
+def _mascara(texto: str) -> bytearray:
+    """1 where the character is code, 0 inside a comment, a string or a template literal.
+
+    Counting braces on raw text lies the moment one string carries one: a real engine's
+    `` `translateY(${dy}px) scale(${escala})` `` opens two levels that never close, and a
+    `//` comment holding `}` would close a block. Masking first keeps the structure
+    honest; a template interpolation is masked with its literal so `${...}` cannot
+    unbalance a declaration.
+    """
+    m = bytearray(b"\x01") * len(texto)
+    i, n = 0, len(texto)
+    while i < n:
+        c = texto[i]
+        if c == "/" and i + 1 < n and texto[i + 1] == "/":
+            while i < n and texto[i] != "\n":
+                m[i] = 0
+                i += 1
+        elif c == "/" and i + 1 < n and texto[i + 1] == "*":
+            fin = texto.find("*/", i + 2)
+            fin = n if fin < 0 else fin + 2
+            while i < fin:
+                if texto[i] != "\n":
+                    m[i] = 0
+                i += 1
+        elif c in "'\"`":
+            i = _cerrar_cadena(texto, m, i)
+        else:
+            i += 1
+    return m
+
+
+def _cerrar_cadena(texto: str, m: bytearray, i: int) -> int:
+    comilla, n = texto[i], len(texto)
+    j = i
+    while j < n:
+        m[j] = 0
+        if texto[j] == "\\" and j + 1 < n:
+            m[j + 1] = 0
+            j += 2
+            continue
+        if texto[j] == comilla:
+            return j + 1
+        j += 1
+    return n
+
+
+def _es_palabra(texto: str, i: int, palabra: str) -> bool:
+    if not texto.startswith(palabra, i):
+        return False
+    fin = i + len(palabra)
+    if fin < len(texto) and (texto[fin].isalnum() or texto[fin] in "_$"):
+        return False
+    return i == 0 or not (texto[i - 1].isalnum() or texto[i - 1] in "_$")
+
+
+def _empieza_declaracion(resto: str) -> bool:
+    if resto.startswith("}"):
+        return True
+    return any(_es_palabra(resto, 0, palabra) for palabra in _CLAVE_DECLARACION)
+
+
+def _fin_de_cuerpo(texto: str, m: bytearray, i: int) -> int:
+    """Index of the `;` that ends a body, or of the line break that ends it by ASI."""
+    n, prof = len(texto), 0
+    while i < n:
+        if not m[i]:
+            i += 1
+            continue
+        c = texto[i]
+        if c in _ABRE:
+            prof += 1
+        elif c in _CIERRA:
+            prof -= 1
+        elif prof == 0 and c == ";":
+            return i
+        elif prof == 0 and c == "\n" and _empieza_declaracion(texto[i + 1:].lstrip()):
+            return i
+        i += 1
+    return n
+
+
+def _leer_declaracion(texto: str, m: bytearray, i: int):
+    """`(nombre, cuerpo, fin)` for the `const` whose keyword starts at `i`, else None."""
+    j = i + len("const")
+    while j < len(texto) and texto[j] in " \t":
+        j += 1
+    idn = _IDENT.match(texto, j)
+    if not idn:
+        return None                       # `const {a, b} = ...`: destructuring, not an anchor
+    nombre, j, prof = idn.group(), idn.end(), 0
+    while j < len(texto):
+        if not m[j]:
+            j += 1
+            continue
+        c = texto[j]
+        if c in _ABRE:
+            prof += 1
+        elif c in _CIERRA:
+            prof -= 1
+        elif prof == 0 and c == "=":
+            break
+        elif prof == 0 and c == ";":
+            return None                   # `declare const X: number;` has no body
+        j += 1
+    else:
+        return None
+    inicio = j + 1
+    fin = _fin_de_cuerpo(texto, m, inicio)
+    return nombre, texto[inicio:fin].strip(), fin
+
+
+_FLECHA = re.compile(
+    r"^(?:\((?P<ps>[^()]*)\)|(?P<solo>[A-Za-z_$][\w$]*))[ \t]*(?::[^=]*)?=>[ \t]*(?P<cuerpo>.+)$",
+    re.S)
+
+
+def _parametros(ps: str) -> list[str]:
+    trozos, prof, actual = [], 0, ""
+    for c in ps:
+        if c in _ABRE:
+            prof += 1
+        elif c in _CIERRA:
+            prof -= 1
+        if c == "," and prof == 0:
+            trozos.append(actual)
+            actual = ""
+        else:
+            actual += c
+    trozos.append(actual)
+    nombres = []
+    for bruto in trozos:
+        bruto = bruto.strip().rstrip("?").strip()
+        if not bruto:
+            continue
+        corte = bruto.find(":")
+        nombres.append((bruto[:corte] if corte > 0 else bruto).strip().rstrip("?").strip())
+    return nombres
 
 
 def extraer_anclas(texto: str) -> dict[str, dict]:
     """Declarations this module can evaluate honestly, keyed by name.
 
-    Each entry is `{"tipo": "const" | "funcion", "cuerpo": str, "params": [...]}`. A
-    declaration it cannot read (object literal, block body, call into something outside
-    the expression) is skipped, not guessed: the caller learns what was measured from the
-    receipt, and an anchor that is missing from it is `NO_MEDIDO`.
+    Each entry is `{"tipo": "const" | "funcion", "cuerpo": str, "params": [...]}`. The
+    reader is structural, not line-based, because a line-based one is wrong on real
+    sources in three measured ways: it truncates a declaration whose arrow spans lines,
+    it reads a return-annotated arrow (`(v: number): boolean => {`) as a constant, and it
+    promotes variables declared *inside* a function body to module anchors.
+
+    So: only declarations at brace depth 0 are anchors; a body runs to its `;` (or to the
+    line break that ends it by ASI), not to the end of the line; an arrow with a block
+    body is skipped, never guessed; `as const` is stripped. Object and array literals are
+    kept as values so `NAME.field` resolves, and a block-bodied function is `NO_MEDIDO`
+    rather than a constant -- an anchor missing from the mapping is how the caller learns
+    the reader did not measure it.
     """
-    limpio = _COMENTARIO.sub("", texto)
+    m = _mascara(texto)
     anclas: dict[str, dict] = {}
-    for nombre, cuerpo in _DECLARACION.findall(limpio):
-        cuerpo = cuerpo.strip()
-        if not cuerpo or cuerpo[0] in "{[`'\"":
+    i, n, prof = 0, len(m), 0
+    while i < n:
+        if not m[i]:
+            i += 1
             continue
-        flecha = _FLECHA.match(cuerpo)
-        if flecha and flecha.group(2).strip().startswith("{"):
-            continue
-        if flecha:
-            params = [p.strip() for p in flecha.group(1).split(",") if p.strip()]
-            anclas[nombre] = {"tipo": "funcion", "cuerpo": flecha.group(2).strip(),
-                              "params": params}
-        else:
-            anclas[nombre] = {"tipo": "const", "cuerpo": cuerpo, "params": []}
+        c = texto[i]
+        if c in _ABRE:
+            prof += 1
+        elif c in _CIERRA:
+            prof -= 1
+        elif prof == 0 and c == "c" and _es_palabra(texto, i, "const"):
+            leida = _leer_declaracion(texto, m, i)
+            if leida is not None:
+                nombre, cuerpo, fin = leida
+                if cuerpo:
+                    flecha = _FLECHA.match(cuerpo)
+                    if flecha:
+                        params = _parametros(
+                            flecha.group("ps") if flecha.group("ps") is not None
+                            else flecha.group("solo"))
+                        resto = flecha.group("cuerpo").strip()
+                        if not resto.startswith("{"):   # block body: no anchor, and measured
+                            anclas[nombre] = {"tipo": "funcion", "cuerpo": resto,
+                                              "params": params}
+                    else:
+                        anclas[nombre] = {"tipo": "const", "cuerpo": cuerpo, "params": []}
+                i = fin
+                continue
+        i += 1
     return anclas
 
 
 # ------------------------------------------------------------------ evaluacion
 
 _TOKEN = re.compile(r"\s*(?:(\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+)|([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)"
-                    r"|(\*\*|[-+*/(),]))")
+                    r"|(\?\?|\*\*|[-+*/(),:?{}[\]]))")
 
 _CONSTANTES = {"Math.PI": math.pi, "Math.E": math.e}
+
+
+def _num(valor):
+    """Arithmetic operands are numbers: a dict or a list here is a scope error, not a value."""
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise FuenteIlegible(f"no es un numero: {valor!r}")
+    return float(valor)
 
 _FUNCIONES = {
     "Math.floor": math.floor,
@@ -136,72 +308,127 @@ class _Evaluador:
         self.i += 1
         return tok
 
-    def evaluar(self) -> float:
-        valor = self._suma()
+    def evaluar(self):
+        valor = self._expresion()
         if self.i != len(self.tokens):
             raise FuenteIlegible(f"sobra {self.tokens[self.i:]}")
         return valor
 
-    def _suma(self) -> float:
+    def _expresion(self):
+        """`a ?? b` returns `b` only when `a` is undefined, which is `None` here."""
+        valor = self._suma()
+        while self._mirar()[1] == "??":
+            self._tomar()
+            otro = self._suma()
+            if valor is None:
+                valor = otro
+        return valor
+
+    def _suma(self):
         valor = self._producto()
         while self._mirar()[1] in ("+", "-"):
             op = self._tomar()[1]
-            valor = valor + self._producto() if op == "+" else valor - self._producto()
+            derecho = self._producto()
+            valor = _num(valor) + _num(derecho) if op == "+" else _num(valor) - _num(derecho)
         return valor
 
-    def _producto(self) -> float:
+    def _producto(self):
         valor = self._potencia()
         while self._mirar()[1] in ("*", "/"):
             op = self._tomar()[1]
             derecho = self._potencia()
-            valor = valor * derecho if op == "*" else valor / derecho
+            valor = _num(valor) * _num(derecho) if op == "*" else _num(valor) / _num(derecho)
         return valor
 
-    def _potencia(self) -> float:
+    def _potencia(self):
         """`**` binds tighter than `*` and is right-associative: `3 * t ** 2` is `3*(t**2)`."""
         base = self._unario()
         if self._mirar()[1] == "**":
             self._tomar()
-            return base ** self._potencia()
+            return _num(base) ** _num(self._potencia())
         return base
 
-    def _unario(self) -> float:
+    def _unario(self):
         if self._mirar()[1] == "-":
             self._tomar()
-            return -self._unario()
+            return -_num(self._unario())
         if self._mirar()[1] == "+":
             self._tomar()
-            return self._unario()
+            return _num(self._unario())
         return self._atomo()
 
-    def _atomo(self) -> float:
+    def _bloque(self, cierra: str) -> list:
+        """Comma-separated values up to `cierra`: the body of an object or array literal."""
+        salida = []
+        if self._mirar()[1] == cierra:
+            self._tomar(cierra)
+            return salida
+        while True:
+            salida.append(self._expresion())
+            if self._mirar()[1] == ",":
+                self._tomar()
+                if self._mirar()[1] == cierra:
+                    self._tomar(cierra)
+                    return salida
+                continue
+            self._tomar(cierra)
+            return salida
+
+    def _objeto(self):
+        self._tomar("{")
+        salida = {}
+        if self._mirar()[1] == "}":
+            self._tomar("}")
+            return salida
+        while True:
+            tipo, clave = self._mirar()
+            if tipo not in ("nombre", "num"):
+                raise FuenteIlegible(f"clave no soportada: {clave!r}")
+            self._tomar()
+            self._tomar(":")
+            salida[str(clave)] = self._expresion()
+            if self._mirar()[1] == ",":
+                self._tomar()
+                if self._mirar()[1] == "}":
+                    self._tomar("}")
+                    return salida
+                continue
+            self._tomar("}")
+            return salida
+
+    def _atomo(self):
         tipo, valor = self._mirar()
         if tipo == "num":
             self._tomar()
             return float(valor)
         if tipo == "op" and valor == "(":
             self._tomar()
-            dentro = self._suma()
+            dentro = self._expresion()
             self._tomar(")")
             return dentro
+        if tipo == "op" and valor == "{":
+            return self._objeto()
+        if tipo == "op" and valor == "[":
+            self._tomar("[")
+            return self._bloque("]")
         if tipo == "nombre":
             self._tomar()
             if self._mirar()[1] == "(":
                 self._tomar()
                 args = []
                 if self._mirar()[1] != ")":
-                    args.append(self._suma())
+                    args.append(self._expresion())
                     while self._mirar()[1] == ",":
                         self._tomar()
-                        args.append(self._suma())
+                        args.append(self._expresion())
                 self._tomar(")")
                 if valor not in _FUNCIONES:
                     raise FuenteIlegible(f"funcion no soportada: {valor}")
-                return float(_FUNCIONES[valor](*args))
+                return _num(_FUNCIONES[valor](*[_num(a) for a in args]))
             if valor in _CONSTANTES:
                 return float(_CONSTANTES[valor])
             if valor in self.entorno:
-                return float(self.entorno[valor])
+                return self.entorno[valor]
             raise FuenteIlegible(f"nombre no declarado: {valor}")
         raise FuenteIlegible(f"token inesperado: {valor!r}")
 
@@ -215,53 +442,82 @@ class _Entorno(dict):
         self._anclas, self._cache, self._en_curso = anclas, cache, en_curso
 
     def __contains__(self, nombre) -> bool:
-        return dict.__contains__(self, nombre) or (
-            nombre in self._anclas and self._anclas[nombre]["tipo"] == "const")
+        if dict.__contains__(self, nombre):
+            return True
+        base = nombre.partition(".")[0]
+        return base in self._anclas and self._anclas[base]["tipo"] != "funcion"
 
-    def __getitem__(self, nombre) -> float:
+    def __getitem__(self, nombre):
         if dict.__contains__(self, nombre):
             return dict.__getitem__(self, nombre)
         return _resolver(self._anclas, nombre, self._cache, self._en_curso)
 
 
-def _resolver(anclas: dict[str, dict], nombre: str, cache: dict[str, float],
-              en_curso: set[str]) -> float:
-    if nombre in cache:
-        return cache[nombre]
-    if nombre in en_curso:
-        raise FuenteIlegible(f"ciclo de constantes en {nombre}")
-    en_curso.add(nombre)
-    ancla = anclas[nombre]
-    valor = _Evaluador(_tokenizar(ancla["cuerpo"]),
-                       _Entorno(anclas, cache, en_curso)).evaluar()
-    en_curso.discard(nombre)
-    cache[nombre] = valor
+def _miembro(valor, resto: str, completo: str):
+    """Walk `a.b.c` over an evaluated literal: a member that is not there is not zero."""
+    for parte in resto.split("."):
+        if isinstance(valor, dict) and parte in valor:
+            valor = valor[parte]
+        elif isinstance(valor, list) and parte.isdigit() and int(parte) < len(valor):
+            valor = valor[int(parte)]
+        else:
+            raise FuenteIlegible(f"{completo} no resuelve: no existe {parte!r}")
     return valor
 
 
+def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[str]):
+    if nombre in cache:
+        return cache[nombre]
+    base, _, resto = nombre.partition(".")
+    if base not in anclas:
+        raise FuenteIlegible(f"nombre no declarado: {base}")
+    if base in en_curso:
+        raise FuenteIlegible(f"ciclo de constantes en {base}")
+    ancla = anclas[base]
+    if ancla["tipo"] == "funcion":
+        raise FuenteIlegible(f"{base} es una funcion: se evalua en puntos, no como constante")
+    en_curso.add(base)
+    valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
+                       _Entorno(anclas, cache, en_curso)).evaluar()
+    en_curso.discard(base)
+    cache[base] = valor
+    return valor if not resto else _miembro(valor, resto, nombre)
+
+
 def evaluar(anclas: dict[str, dict], nombre: str, puntos=None,
-            cache: dict[str, float] | None = None) -> float | list[float]:
-    """Evaluate one anchor. A function is evaluated at each of `puntos`."""
-    if nombre not in anclas:
+            cache: dict | None = None):
+    """Evaluate one anchor. A function is evaluated at each of `puntos`.
+
+    `nombre` may be a path (`CANVAS.ancho`, `rect.top`): the base is evaluated and the
+    remaining members are walked, so a source that returns a layout object is comparable
+    field by field instead of being written off as opaque. A point of `None` means the
+    call site passes no argument, which is the only honest way to reproduce a JS
+    `param ?? fallback` default.
+    """
+    base, _, resto = nombre.partition(".")
+    if base not in anclas:
         raise AnclaDesconocida(nombre)
-    ancla = anclas[nombre]
+    ancla = anclas[base]
     cache = {} if cache is None else cache
     constantes = _Entorno(anclas, cache, set())
     if ancla["tipo"] == "const":
         if puntos:
             raise FuenteIlegible(f"{nombre} es una constante, no se evalua en puntos")
-        return _Evaluador(_tokenizar(ancla["cuerpo"]), constantes).evaluar()
+        valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
+                           constantes).evaluar()
+        return valor if not resto else _miembro(valor, resto, nombre)
     if not puntos:
         puntos = [0.0]
     if len(ancla["params"]) != 1:
         raise FuenteIlegible(
-            f"{nombre} declara {len(ancla['params'])} parametros; este lector evalua funciones de uno")
+            f"{base} declara {len(ancla['params'])} parametros; este lector evalua funciones de uno")
     salida = []
-    tokens = _tokenizar(ancla["cuerpo"])
+    tokens = _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
     for u in puntos:
         entorno = _Entorno(anclas, cache, set())
-        entorno[ancla["params"][0]] = float(u)
-        salida.append(_Evaluador(tokens, entorno).evaluar())
+        entorno[ancla["params"][0]] = None if u is None else float(u)
+        valor = _Evaluador(tokens, entorno).evaluar()
+        salida.append(valor if not resto else _miembro(valor, resto, nombre))
     return salida
 
 
@@ -291,25 +547,41 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     if anclas is None:
         if not texto:
             return {"rc": RC_NO_MEDIDO, "causa": "SIN_FUENTE",
-                    "detalle": "sin fuente TypeScript que evaluar", "anclas": []}
+                    "detalle": "sin fuente TypeScript que evaluar", "anclas": [],
+                    "no_evaluables": []}
         anclas = extraer_anclas(texto)
     if not anclas:
         return {"rc": RC_NO_MEDIDO, "causa": "SIN_ANCLAS",
-                "detalle": "la fuente no declara ninguna ancla evaluable", "anclas": []}
-    filas, divergen, no_medidas, cache = [], 0, [], {}
+                "detalle": "la fuente no declara ninguna ancla evaluable", "anclas": [],
+                "no_evaluables": []}
+    filas, divergen, no_medidas, no_evaluables, cache = [], 0, [], [], {}
     for nombre, esperado in referencia.items():
-        if nombre not in anclas:
+        if nombre.partition(".")[0] not in anclas:
             no_medidas.append(nombre)
             continue
         if isinstance(esperado, dict):
-            puntos = [float(p) for p in esperado["puntos"]]
+            puntos = [None if p is None else float(p) for p in esperado["puntos"]]
             valores = [float(v) for v in esperado["valores"]]
         else:
             puntos, valores = [], [float(esperado)]
-        obtenidos = evaluar(anclas, nombre, puntos, cache)
+        try:
+            obtenidos = evaluar(anclas, nombre, puntos, cache)
+        except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
+            no_evaluables.append({"ancla": nombre, "motivo": str(fallo)})
+            continue
         if not isinstance(obtenidos, list):
             obtenidos = [obtenidos]
-        fila = {"ancla": nombre, "tipo": anclas[nombre]["tipo"], "puntos": len(obtenidos),
+        # A literal (object, list) is not a number: comparing it would invent a value, so
+        # the caller is told to name a field instead.
+        numeros = [o for o in obtenidos
+                   if isinstance(o, (int, float)) and not isinstance(o, bool)]
+        if len(numeros) != len(obtenidos):
+            no_evaluables.append({"ancla": nombre,
+                                  "motivo": "devuelve un literal: nombra un campo con `nombre.campo`"})
+            continue
+        obtenidos = numeros
+        fila = {"ancla": nombre, "tipo": anclas[nombre.partition(".")[0]]["tipo"],
+                "puntos": len(obtenidos),
                 "peor_abs": 0.0, "peor_rel": 0.0, "peor_punto": None, "ok": True}
         for punto, obtenido, valor in zip(puntos or [None], obtenidos, valores):
             error = abs(obtenido - valor)
@@ -331,11 +603,21 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     if no_medidas:
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_DECLARADA",
                 "detalle": f"la fuente no declara {', '.join(sorted(no_medidas))}",
-                "anclas": filas}
-    return {"rc": RC_DIVERGE if divergen else RC_OK,
-            "causa": "DIVERGE" if divergen else "",
-            "detalle": f"{divergen} punto(s) fuera de tolerancia {tolerancia:g}" if divergen else "",
-            "tolerancia": tolerancia, "anclas": filas}
+                "anclas": filas, "no_evaluables": no_evaluables}
+    # A divergence is a measurement and outranks a gap; a gap never degrades to conforming.
+    if divergen:
+        return {"rc": RC_DIVERGE, "causa": "DIVERGE",
+                "detalle": f"{divergen} punto(s) fuera de tolerancia {tolerancia:g}",
+                "tolerancia": tolerancia, "anclas": filas,
+                "no_evaluables": no_evaluables}
+    if no_evaluables:
+        nombres = ", ".join(f["ancla"] for f in no_evaluables)
+        return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_EVALUABLE",
+                "detalle": f"fuera del subconjunto legible: {nombres}",
+                "tolerancia": tolerancia, "anclas": filas,
+                "no_evaluables": no_evaluables}
+    return {"rc": RC_OK, "causa": "", "detalle": "", "tolerancia": tolerancia,
+            "anclas": filas, "no_evaluables": []}
 
 
 # --------------------------------------------------------------------- anclas
@@ -353,6 +635,26 @@ const DESPLAZAMIENTO = (t) => 17.4 * (t ** 3 - 3 * t ** 2 + 3 * t);
 const REDONDEADO: { ancho: number } = { ancho: 986 };
 """
 
+# The three shapes that a line-based reader gets wrong on a real source, synthetic here so
+# the regression travels with the code: a declaration whose arrow spans lines, an arrow
+# annotated with its return type, and variables declared inside a function body.
+_FUENTE_ESTRUCTURAL = """
+export const CAJA = { ancho: 1080, alto: 1920 } as const;
+export const VIEW = { ancho: 864, alto: 960 } as const;
+export const rect = (y?: number) => ({
+  left: (CAJA.ancho - VIEW.ancho) / 2,
+  top: y ?? (CAJA.alto - VIEW.alto) / 2,
+  width: VIEW.ancho,
+  height: VIEW.alto,
+});
+export const esNodo = (v: number): boolean => {
+  const m = v / 1.2;
+  return Math.abs(m - Math.round(m)) * 1.2 < 0.15;
+};
+export const cerca = (v: number) =>
+  VIEW.ancho.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+"""
+
 
 def _autotest() -> int:
     fallos = []
@@ -367,9 +669,8 @@ def _autotest() -> int:
     anclas = extraer_anclas(_FUENTE_SINTETICA)
     igual("anclas leidas", sorted(anclas), sorted(
         ["VENTANA_ANCHO", "VENTANA_ALTO", "LIENZO_ANCHO", "MARGEN", "ESCALA", "LONA",
-         "FRACCION", "DESPLAZAMIENTO"]))
-    if "REDONDEADO" in anclas:
-        fallos.append("un literal de objeto se declaro evaluable")
+         "FRACCION", "DESPLAZAMIENTO", "REDONDEADO"]))
+    igual("miembro de objeto", evaluar(anclas, "REDONDEADO.ancho"), 986.0)
     igual("constante", evaluar(anclas, "LONA"), 768 * (1725 / 1344))
     igual("Math.floor", evaluar(anclas, "MARGEN"), 108.0)
     igual("funcion cubo", evaluar(anclas, "FRACCION", [0.5])[0], 0.125)
@@ -378,6 +679,7 @@ def _autotest() -> int:
                                {"puntos": [0.0, 0.5, 1.0], "valores": [0.0, 0.125, 1.0]}},
                         anclas=anclas)
     igual("conforme rc", conforme["rc"], RC_OK)
+    igual("recibo sin huecos", conforme["no_evaluables"], [])
     divergente = comparar(None, {"LONA": 985.714176}, anclas=anclas)
     igual("deriva rc", divergente["rc"], RC_DIVERGE)
     cerca = comparar(None, {"LONA": 985.714176 + 1e-4}, tolerancia=1e-3, anclas=anclas)
@@ -388,12 +690,31 @@ def _autotest() -> int:
     residuo = residuo_de_redondeo(985.714176)
     igual("residuo floor", residuo["floor"]["residuo"], 0.714176)
     igual("residuo round", residuo["round"]["residuo"], -0.285824)
+
+    # Structural reading: depth 0 only, block bodies skipped, `as const` dropped, and a
+    # function that returns a literal comparable field by field.
+    est = extraer_anclas(_FUENTE_ESTRUCTURAL)
+    igual("anclas estructurales", sorted(est), ["CAJA", "VIEW", "cerca", "rect"])
+    if "m" in est:
+        fallos.append("una variable local se leyo como ancla de modulo")
+    if "esNodo" in est:
+        fallos.append("una funcion con cuerpo de bloque se leyo como ancla")
+    igual("campo de objeto devuelto", evaluar(est, "rect.left")[0], 108.0)
+    igual("campo por defecto", evaluar(est, "rect.top", [None])[0], 480.0)
+    igual("campo con argumento", evaluar(est, "rect.top", [500.0])[0], 500.0)
+    sin_defecto = comparar(None, {"rect.top": {"puntos": [0.0], "valores": [480.0]}},
+                           anclas=est)
+    igual("?? no se ignora", sin_defecto["rc"], RC_DIVERGE)
+    no_leible = comparar(None, {"cerca": {"puntos": [1.0], "valores": [1.8]}}, anclas=est)
+    igual("declarada pero fuera del subconjunto", no_leible["rc"], RC_NO_MEDIDO)
+    igual("hueco nombrado", no_leible["causa"], "ANCLA_NO_EVALUABLE")
+    igual("hueco en el recibo", [f["ancla"] for f in no_leible["no_evaluables"]], ["cerca"])
     for mensaje in fallos:
         print(f"FALLO {mensaje}", file=sys.stderr)
     if fallos:
         print(f"AUTOTEST NO OK: {len(fallos)} ancla(s)", file=sys.stderr)
         return RC_DIVERGE
-    print("AUTOTEST OK: 15 anclas de oraculo")
+    print("AUTOTEST OK: 33 anclas de oraculo")
     return RC_OK
 
 
@@ -405,10 +726,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--referencia", help="JSON {nombre: valor} o {nombre: {puntos, valores}}")
     parser.add_argument("--tolerancia", type=float, default=0.0)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--censo", action="store_true",
+                        help="listar las anclas que el lector ve, sin evaluar nada")
     parser.add_argument("--self-test", "--autotest", dest="self_test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
         return _autotest()
+    if args.censo:
+        if not args.fuente:
+            print("uso: anchor_oracle.py --fuente F.ts --censo [--json]", file=sys.stderr)
+            return RC_ARITY
+        from pathlib import Path
+
+        anclas = extraer_anclas(Path(args.fuente).read_text())
+        if args.json:
+            print(json.dumps(anclas, indent=2, sort_keys=True))
+            return RC_OK
+        for nombre, ancla in anclas.items():
+            primero = ancla["cuerpo"].splitlines()[0]
+            print(f"{nombre} · {ancla['tipo']} · {primero}")
+        print(f"CENSO · {len(anclas)} ancla(s) · las funciones con cuerpo de bloque y las "
+              f"variables locales no se leen", file=sys.stderr)
+        return RC_OK
     if not args.fuente or not args.referencia:
         print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]",
               file=sys.stderr)

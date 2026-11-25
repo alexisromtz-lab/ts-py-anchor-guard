@@ -22,9 +22,44 @@ class AnclasTest(unittest.TestCase):
             export const OBJETO: { w: number } = { w: 1 };
             // const COMENTADA = 3;
         """)
-        self.assertEqual(sorted(anclas), ["A", "B", "f"])
+        self.assertEqual(sorted(anclas), ["A", "B", "OBJETO", "f"])
         self.assertEqual(anclas["B"]["cuerpo"], "1725 / 1344")
         self.assertEqual(anclas["f"]["params"], ["u"])
+
+    def test_solo_lee_declaraciones_de_modulo(self):
+        """A local promoted to a module anchor is a silent overwrite hazard."""
+        anclas = extraer_anclas("""
+            export const A = 864;
+            export const caja = (v: number): boolean => {
+              const m = v / 1.2;
+              let z = m;
+              return z < 1;
+            };
+        """)
+        self.assertEqual(sorted(anclas), ["A"])
+
+    def test_cuerpo_multilinea_y_anotacion_de_retorno(self):
+        anclas = extraer_anclas("""
+            export const C = { ancho: 1080, alto: 1920 } as const;
+            export const rect = (y?: number) => ({
+              left: (C.ancho - 864) / 2,
+              top: y ?? (C.alto - 960) / 2,
+            });
+        """)
+        self.assertEqual(sorted(anclas), ["C", "rect"])
+        self.assertEqual(anclas["rect"]["params"], ["y"])
+        self.assertEqual(evaluar(anclas, "rect.left"), [108.0])
+        self.assertEqual(evaluar(anclas, "rect.top", [None]), [480.0])
+        self.assertEqual(evaluar(anclas, "rect.top", [500.0]), [500.0])
+
+    def test_un_literal_devuelto_pide_un_campo_en_vez_de_inventar(self):
+        anclas = extraer_anclas("const C = { ancho: 1080 };")
+        self.assertEqual(evaluar(anclas, "C.ancho"), 1080.0)
+        with self.assertRaises(FuenteIlegible):
+            evaluar(anclas, "C.no_existe")
+        recibo = comparar(None, {"C": 1080.0}, anclas=anclas)
+        self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "ANCLA_NO_EVALUABLE")
 
     def test_potencia_liga_mas_que_producto_y_asocia_a_derecha(self):
         anclas = extraer_anclas("const k = (u) => 3 * u ** 2 + 2 ** u ** 2;")
@@ -85,6 +120,32 @@ class ComparacionTest(unittest.TestCase):
         self.assertEqual(comparar(FUENTE, {"NO_EXISTE": 1.0})["causa"], "ANCLA_NO_DECLARADA")
         self.assertEqual(comparar(None, {"A": 1.0})["rc"], RC_NO_MEDIDO)
         self.assertEqual(comparar("// nada evaluable", {"A": 1.0})["rc"], RC_NO_MEDIDO)
+
+    def test_una_ancla_ilegible_es_no_medido_y_no_una_excepcion(self):
+        """A declared anchor the reader cannot evaluate must not slip through as conforming."""
+        fuente = FUENTE + "\nexport const reduce_algo = (v: number) => [1.0].reduce((a, b) => b);"
+        recibo = comparar(fuente, {"reduce_algo": {"puntos": [1.0], "valores": [1.0]}})
+        self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "ANCLA_NO_EVALUABLE")
+        self.assertEqual([f["ancla"] for f in recibo["no_evaluables"]], ["reduce_algo"])
+
+    def test_una_divergencia_manda_sobre_un_hueco(self):
+        fuente = FUENTE + "\nexport const reduce_algo = (v: number) => [1.0].reduce((a, b) => b);"
+        recibo = comparar(fuente, {"reduce_algo": {"puntos": [1.0], "valores": [1.0]},
+                                   "PLATE_W": 986.0})
+        self.assertEqual(recibo["rc"], RC_DIVERGE)
+        self.assertEqual(len(recibo["no_evaluables"]), 1)
+
+    def test_el_fixture_ejercita_la_forma_real_y_declara_su_limite(self):
+        """The published fixture must carry the shapes the reader gets wrong, not only the easy ones."""
+        anclas = extraer_anclas(FUENTE)
+        for nombre in ("BOX", "VIEW", "rectView", "NEAR", "nearestNode"):
+            self.assertIn(nombre, anclas)
+        for local in ("m", "d", "gap", "onNode"):
+            self.assertNotIn(local, anclas, f"{local} no es una ancla de modulo")
+        recibo = comparar(FUENTE, {"nearestNode": {"puntos": [3.1], "valores": [3.0]}})
+        self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "ANCLA_NO_EVALUABLE")
 
     def test_residuo_reporta_las_tres_politicas(self):
         residuo = residuo_de_redondeo(60.85714285714286)
