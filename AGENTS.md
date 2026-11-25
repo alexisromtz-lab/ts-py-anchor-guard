@@ -28,6 +28,25 @@ appear here. The fixtures are synthetic on purpose.
   a second implementation of the same formula is weaker evidence than comparing it against
   the interpreter that runs it. A requested backend that cannot run is `NO_MEDIDO`; falling
   back quietly would make the mode undeclared, which is worse than the gap.
+- **An answer is a function of its inputs, and the tree is an input.** A check that changes
+  its verdict because an earlier run left `__pycache__` behind is measuring the run. Pin the
+  property where it can be seen (a cold copy) or pin the predicate on the events it actually
+  receives — never on a count that a warm tree hides. The same rule governs a repeat: the
+  second run has to start from the first run's initial state, not from what it left behind, and
+  it must not be compared against the first run's location. Two copies that fail the same test
+  differ in their temporary path; reading that as non-determinism turns a reproducible kill
+  into a `FLAKY`, which is the same class of error as counting a flake as a kill.
+- **A cell that is empty is a measurement, not an omission.** A published contract that lists
+  four codes over four modules is a grid of sixteen claims, and the ones a module cannot emit
+  are the ones a reader will assume it can. Declare the empty cell with the code it *does*
+  return and the reason, and let a script go red when it starts firing. Never infer a cell
+  from a flag's name: `--referencia` says compare, and one of these modules only reads its
+  keys. And a negative control that breaks the way the subject breaks proves nothing.
+- **A filter reads the event, never the excerpt.** A predicate applied to `repr(args)[:160]`
+  agrees with the argument until a path is long enough to lose its suffix to the cut, and then
+  it classifies the wrong thing without failing: on macOS, system Python caches bytecode under
+  `~/Library/Caches/com.apple.python/<path>-39.pyc`, so three modules "opened data" with zero
+  data opened. Truncate for printing, never for judging.
 
 ## Style
 

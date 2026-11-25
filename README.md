@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.3.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -85,6 +85,13 @@ conflation this package exists to prevent.
 that came out of it, so the sentence "the suite would notice if the code were wrong" is a
 number a reader can re-run instead of a claim in a README. The minor version moves because the
 set of shipped files changed, not the contract.
+
+`0.4.0` adds `tools/contrato_censo.py`, which runs each CLI once per exit-code cell and
+compares the code with what the process actually returned — no expectation is taken from a
+flag's name. It found one: `--referencia` in `live_oracle` reads the *names* to evaluate and
+never compares the values, while the flag name promised a comparison. The help text now says
+so, and the code is unchanged; the judging variant is `anchor_oracle --backend node`. Again the
+minor version moves because a file was added, not because an exit code changed.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -282,7 +289,8 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `22` of `25` mutants killed; the other `3` are unreachable by arithmetic | 25 curated single-line mutations of the four modules, each in a fresh copy, every kill repeated on the same copy | yes — `python3 tools/mutate.py`, which ships with the 25 mutations and names the three exemptions |
+| `29` of `33` mutants killed; the other `4` cannot be reached by any input | 33 curated single-line mutations across seven sites (four modules, the CLI, two harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 33 mutations and names the four exemptions with their reason |
+| `13` of `16` exit-code cells measured; `3` empty, each with its motive | every CLI run once per cell, its exit code compared with the process's, no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 
@@ -294,45 +302,58 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 25 mutations, 22 killed
+### What the tests would notice: 33 mutations, 29 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 25 one-line
-mutations were applied to the four modules, each in a fresh copy, each followed by the whole
-suite.
+open the fixture" but "if the code were wrong, would anything go red" — so 33 one-line
+mutations are applied across seven sites (the four modules, the CLI, and the two harness
+probes), each in a fresh copy, each followed by the whole suite.
 
-- **17 of 25 died** on the suite as it stood. Five of the eight survivors were live coverage
-  gaps, and each now has a test that fails on the mutant and passes on the code: the left
-  edge of the search window (`-max_shift` was never exercised, only `+max_shift`), the reason
-  a band count is refused (the short bands raised further down, for a different reason, so
-  the guard could be deleted and the test still passed), an aspect stretch on the vertical
-  axis only (`escala[0] == 1.0` was checked, `escala[1]` was not), `round` implemented as
-  `floor(x + 0.4)` (indistinguishable from `floor(x + 0.5)` unless the fraction lands in
-  `(0.4, 0.5)`, which the fixture did not contain), and the relative error reported as the
-  absolute one.
-- **22 of 25 die now**, and the mutation that exposed each gap is part of the record above.
+- **17 of 25 died** on the suite as it stood before the first pass of this section. Five of the
+  eight survivors were live coverage gaps, and each now has a test that fails on the mutant and
+  passes on the code: the left edge of the search window (`-max_shift` was never exercised,
+  only `+max_shift`), the reason a band count is refused (the short bands raised further down,
+  for a different reason, so the guard could be deleted and the test still passed), an aspect
+  stretch on the vertical axis only (`escala[0] == 1.0` was checked, `escala[1]` was not),
+  `round` implemented as `floor(x + 0.4)` (indistinguishable from `floor(x + 0.5)` unless the
+  fraction lands in `(0.4, 0.5)`, which the fixture did not contain), and the relative error
+  reported as the absolute one.
+- **22 of 25 died** once those five tests existed. The set then grew to 33 when the exit-code
+  census and the self-test probe were brought under the same instrument.
+- **29 of 33 die now.** The four survivors are the declared ones in the table below, and the
+  script reports `huecos de cobertura: ninguno` — zero undeclared holes — with exit code `0`.
 
-Both numbers come from `tools/mutate.py`, which runs the whole set and prints one line per
-mutant. The `17` is re-measured, not remembered: the same script, run against the tests at the
-previous commit, reports 17 dead, 8 alive, and names the five coverage gaps itself —
+The `17` is re-measured, not remembered: the same script, run against the tests at that
+earlier commit, reports 17 dead, 8 alive, and names the five coverage gaps itself —
 
 ```
 huecos de cobertura: sp_borde_izq, sp_bandas_guarda, ve_escala_eje1, ao_round_04, ao_rel_no_relativo
 ```
 
-— which is where the list above came from. Against the current tree the same line reads
-`huecos de cobertura: ninguno`, with exit code `0`.
+— which is where the list above came from.
 
-One line is informational rather than a rate: two mutants are killed by a *different* test
-module than the one whose source they edit (the packaged self-test probe catches the flipped
-SSD sign; a CLI test catches the zero-side canvas). Those kills are real, and the script says
-`[ajeno]` so nobody counts them as the site's own coverage.
+**No kill in the final run depends on another site's tests** — and getting there was a fix to
+the verdict rule, not to the suite. The first version judged a kill by its *first* failing
+test, so four mutants whose own module's test also died were printed as `[ajeno]`: a label that
+reads as "nobody who owns this notices". The verdict now looks at the whole set of failing
+tests, and the report names the test that owns the mutant. The cost of the old rule is
+measurable: deleting `tests/test_contrato_censo.py` from a copy and re-running the two CLI
+mutants leaves both of them dead, killed by `tests.test_contrato_cli`. So the census adds no
+mutation coverage; what it buys is the sixteen-cell contract, which is a different claim, and
+the mutation rate was never evidence for it.
 
-Two rules make the report trustworthy, and both were learned by getting them wrong:
+Four rules make the report trustworthy. All four were learned by getting them wrong.
 
-- **A kill has to reproduce.** Every nonzero run is repeated on the same copy. A mutation that
-  fails once and passes on the second run is reported as `FLAKY`, never as killed — and the
-  script exits `2`, so a flaky run cannot be read as a rate.
+- **A kill has to reproduce.** Every nonzero run is repeated on a fresh copy of the mutant. A
+  mutation that fails once and passes on the second run is reported as `FLAKY`, never as
+  killed, and the script exits `2`, so a flaky run cannot be read as a rate.
+- **The repeat must not compare where the copy lived.** Two runs that fail the *same* test
+  differ in one respect: the temporary path each one runs in. Comparing the raw report made a
+  reproducible kill look non-deterministic for a whole session (`au_filtro_py`, a payload that
+  quotes the path of the file it opened). Where the copy lives is an input of the run, not an
+  observation, so the location is normalised out before the two runs are compared — and the
+  comparison uses the *set* of failing tests, because `A and B` versus `A alone` is not a
+  repeat either.
 - **A test that asserts the shape of the source cannot judge a mutation of the source.** The
   first version of the harness shipped its own invariant test (`this pattern appears exactly
   once`) inside the repository it mutates. With that test in the copy, all 25 mutants died for
@@ -341,18 +362,24 @@ Two rules make the report trustworthy, and both were learned by getting them wro
   the instrument instead of the subject. Two changes came out of it: the harness test is
   excluded from mutant copies by name, and any kill traced to it now aborts with `2` instead of
   counting.
+- **A repetition has to start from the initial state.** A suite run is not a read-only act:
+  one CLI test launches an interpreter without `-B` and leaves a `__pycache__/_cli.pyc` behind,
+  so the repeat read the compiled module and the mutant became invisible. Each run now copies
+  the whole tree instead of cleaning selectively.
 
-**Three mutants cannot be killed by any test, and that is the finding, not an omission.** They
-are guards the arithmetic makes unreachable, so no input distinguishes mutant from original:
+**Four mutants cannot be killed by any test, and that is the finding, not an omission.** Three
+are guards the arithmetic makes unreachable, and one is a branch whose input nothing produces.
+No input distinguishes them from the original, so no test can:
 
 | mutant | why no input reaches it |
 |---|---|
 | drop the `+-0.5` clamp on the parabola vertex | with `c0` the minimum cost, `c0 <= c_menos` and `c0 <= c_mas`, hence `abs(c_menos - c_mas) <= c_menos - 2*c0 + c_mas`: the vertex is always inside `+-0.5`. The clamp documents the bound; `test_el_desplazamiento_cabe_siempre_en_media_muestra` pins the invariant instead of the guard |
 | `curvatura <= 0` → `curvatura < 0` | `curvatura == 0` needs `c_menos + c_mas == 2*c0` with `c0` a minimum, i.e. a three-way tie, which exact integer sums can produce only by making the parabola flat everywhere — not with `_ssd` over distinct shifts |
 | allow bands with fewer than 2 samples of overlap | the `2*max_shift + 8 > min(len)` check already refuses those inputs, so the later guard is shadowed by the earlier one from every public entry point |
+| read bytecode by descriptor only on `'xb'` | measured: the interpreter opens `__pycache__` files with mode `'wb'`, so the `'xb'` arm of the filter has no producer. The observable half — that the probe does not leave bytecode behind — is pinned by `test_la_sonda_no_deja_bytecode_en_el_arbol`, which does kill the mutant that removes `-B` |
 
-Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks
-for it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
+Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks for
+it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
 
 ## Contract
 
@@ -388,12 +415,22 @@ tree reports 23 or 24 depending on whether a bytecode cache already existed. `0`
 *nonzero* is the invariant; the exact number is a property of the fixture, and
 `tests/test_audit_self_test.py` pins the former rather than the latter.
 
-Measuring the self-test is itself a case of the problem this package exists to catch. The
-first version of this probe reported 1 event for `anchor_oracle` on a fresh clone and 0
-afterwards, because the first import writes a `.pyc` through a bare file descriptor and the
-event carries no path for a filter to match. The probe now runs each module with `-B`, and
-skips descriptor writes as a second net, so the answer no longer depends on whether the
-clone was warm.
+Measuring the self-test is itself a case of the problem this package exists to catch, twice
+over.
+
+The first version reported 1 event for `anchor_oracle` on a fresh clone and 0 afterwards,
+because the first import writes a `.pyc` through a bare file descriptor and the event carries
+no path for a filter to match. The probe now runs each module with `-B`, and skips descriptor
+writes as a second net, so the answer no longer depends on whether the clone was warm.
+
+The second version filtered on the *excerpt* it prints — `repr(args)[:160]` — instead of on
+the event's own arguments. Both agree until a path is long: macOS caches the system Python's
+bytecode in `~/Library/Caches/com.apple.python/<path>-39.pyc`, and a copy under `$TMPDIR` puts
+the `.pyc` past the cut, so loading code stopped matching the code filter and was reported as
+data I/O. Three modules went red on Python 3.9 with zero data opened. The filter now takes the
+tuple (`_es_dato`), the cutoff is applied only to what gets printed, and
+`test_una_ruta_de_codigo_larga_sigue_siendo_carga_de_codigo` pins it. A filter that reads a
+display string is measuring the report, not the event.
 
 Three of them also take `--json` for the full receipt; `live_oracle` takes no such flag
 because its receipt is JSON unconditionally — a flag that would not change the output is
@@ -404,6 +441,50 @@ that does not exist exits `2` with a `NO_MEDIDO · INSUMO_FALTA` line instead of
 that would leave the process at `1`, the code that means *the port is wrong*. Both were
 wrong until this commit; `tests/test_contrato_cli.py` measures the process, not
 `main()`, because the process is what a runner reads.
+
+### Which of the sixteen cells each CLI actually emits
+
+A table of four codes is a claim about four processes, and a claim about a process is not
+read, it is measured. `tools/contrato_censo.py` runs every CLI once per cell and compares
+the exit code, so the cells that are *empty* are measurements too — each one carries the
+code it does return and the reason, and the census goes red the day one of them starts
+firing instead of this table going stale.
+
+| module | `0` | `1` | `2` | `20` |
+|---|---|---|---|---|
+| `anchor_oracle` | measured | measured | measured | measured |
+| `live_oracle` | measured | **empty — a reader, not a judge** | measured | measured |
+| `subpixel_probe` | measured | **empty — a reader, not a judge** | measured | measured |
+| `viewport_embed` | measured | measured | **empty — it reads no file** | measured |
+
+The three empty cells, with the code they do return:
+
+- **`live_oracle` + `1` → `0`.** Its CLI is a reader: `--referencia` supplies the *names* to
+  evaluate with `node`, never the values to compare against, and `main` prints the measured
+  numbers and exits `0`. Fed a reference whose `CANVAS_W` is off by 9, it still exits `0`.
+  The judging lives one layer up, in `anchor_oracle --backend node`, which takes those same
+  numbers through `comparar` and does exit `1`.
+- **`subpixel_probe` + `1` → `2`.** Two unrelated profiles produce a phase, not a
+  divergence: with no reference to be wrong about, the honest answer is `NO_MEDIDO`.
+- **`viewport_embed` + `2` → `20`.** It opens no file, so a missing input is arity, not
+  `INSUMO_FALTA`.
+
+Two things this instrument got wrong before it got the table right, both worth stating
+because they are the failure it exists to catch:
+
+- **The first census read the flag's name and concluded it compared.** `--referencia` reads
+  like "compare against this", so the row was written as `expects 1` and the module
+  disagreed. A flag that carries a name is not a reader of what the name promises; the fix
+  was to declare the empty cell inside the tool, with its motive, instead of inferring it
+  from a word.
+- **The first negative control ran the subject.** It took a real cell, replaced the
+  expectation with `99`, and checked that the census complained. A control that breaks in
+  the same way the subject breaks cannot tell you the subject is right; it now spawns a
+  throwaway process that exits `7` against an expectation of `99`.
+
+Without `node`, the `live_oracle` cells become a fourth class rather than a false green:
+the expectation is `2`, because that is what the reader returns when it cannot measure.
+
 
 ## Tests
 

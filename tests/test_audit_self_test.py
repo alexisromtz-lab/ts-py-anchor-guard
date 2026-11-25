@@ -8,9 +8,12 @@ held. What is pinned here is the shape that cannot move.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -18,6 +21,10 @@ RAIZ = Path(__file__).resolve().parents[1]
 PROBE = RAIZ / "tools" / "audit_self_test.py"
 SIN_IO = ("anchor_oracle", "subpixel_probe", "viewport_embed")
 CON_IO = "live_oracle"
+
+_ESPEC = importlib.util.spec_from_file_location("audit_self_test", PROBE)
+probe = importlib.util.module_from_spec(_ESPEC)
+_ESPEC.loader.exec_module(probe)
 
 
 def correr(*args: str) -> tuple[int, str]:
@@ -52,6 +59,54 @@ class ContratoDelProbe(unittest.TestCase):
 
     def test_modulo_desconocido_es_20(self):
         self.assertEqual(correr("no_existe")[0], 20)
+
+    def test_el_filtro_de_codigo_no_confunde_carga_con_datos(self):
+        """The `.py` branch of the code-loading filter, pinned by the payloads it receives.
+
+        It cannot be pinned from the report: a self-test's lazy import reads `_cli.py` only
+        in a cold tree. Once `_cli.cpython-312.pyc` exists — and any test that spawns an
+        interpreter without `-B` leaves it — the same import reads the bytecode, and the
+        report stays at `0` either way. So the filter is judged on the events an audit hook
+        actually produced here, with a data write as the negative control.
+        """
+        arbol = str(RAIZ)
+        carga = (
+            f"('{arbol}/ts_py_anchor_guard/_cli.py', 'r', 16777216)",
+            f"('{arbol}/ts_py_anchor_guard/__pycache__/_cli.cpython-312.pyc', 'r', 16777216)",
+            f"('{arbol}/ts_py_anchor_guard/__pycache__/_cli.cpython-312.pyc.4328636096', None, 16779777)",
+        )
+        for args in carga:
+            with self.subTest(evento=args):
+                self.assertTrue(probe._es_carga_de_codigo("open", args))
+        self.assertFalse(probe._es_carga_de_codigo(
+            "open", "('/var/folders/x/T/oraculo-vivo-y/fuente.ts', 'w', 16778753)"))
+
+    def test_una_ruta_de_codigo_larga_sigue_siendo_carga_de_codigo(self):
+        """The filter has to see the event's own arguments, not the 160-character excerpt
+        that gets printed: macOS caches system-Python bytecode under
+        `~/Library/Caches/com.apple.python/<path>-39.pyc`, and a copy under `$TMPDIR` puts
+        the `.pyc` past the cut, which turned code loading into a false data-I/O report."""
+        larga = ("/home/user/Library/Caches/com.apple.python/var/folders/ab/" + "z" * 200
+                 + "/copia/ts_py_anchor_guard/_cli.cpython-39.pyc")
+        self.assertFalse(probe._es_dato("open", (larga, "rb", 16777216)))
+        self.assertTrue(probe._es_dato("open", (larga.replace(".pyc", ".json"), "r", 0)))
+
+    def test_la_sonda_no_deja_bytecode_en_el_arbol(self):
+        """Asking the probe a question must not answer by leaving files behind.
+
+        Without `-B` the lazily imported `_cli` is compiled and written through a bare
+        descriptor, and the verdict does not move — the descriptor filter catches it. So the
+        flag cannot be pinned by any count: it is pinned by the tree, which a cold copy
+        makes observable.
+        """
+        with tempfile.TemporaryDirectory(prefix="probe-frio-") as tmp:
+            copia = Path(tmp) / "copia"
+            shutil.copytree(RAIZ, copia, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            p = subprocess.run(
+                [sys.executable, str(copia / "tools" / "audit_self_test.py"), *SIN_IO],
+                capture_output=True, text=True, cwd=copia, timeout=600)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertEqual([str(x.relative_to(copia)) for x in copia.rglob("*.pyc")], [])
 
 
 if __name__ == "__main__":

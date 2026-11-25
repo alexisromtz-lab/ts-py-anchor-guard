@@ -166,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = ParserDeContrato(description=__doc__.splitlines()[0])
     parser.add_argument("--fuente", help="archivo TypeScript a ejecutar")
-    parser.add_argument("--referencia", help="JSON {nombre: valor o {puntos, valores}}")
+    parser.add_argument("--referencia",
+                        help="JSON con los nombres a evaluar; los valores no se comparan "
+                             "(para juzgar contra la referencia, anchor_oracle --backend node)")
     parser.add_argument("--self-test", "--autotest", dest="self_test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:

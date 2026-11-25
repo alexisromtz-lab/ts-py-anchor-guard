@@ -61,6 +61,21 @@ def _es_bytecode_por_fd(evento: str, args: tuple) -> bool:
             and ("w" in args[1] or "x" in args[1]))
 
 
+def _es_dato(evento: str, args: tuple) -> bool:
+    """Si el evento es I/O de datos. Se juzga sobre los argumentos del evento, no sobre el
+    recorte que se imprime.
+
+    En macOS el Python del sistema cachea el bytecode de una copia en
+    `~/Library/Caches/com.apple.python/<ruta>-39.pyc`. Con la copia bajo `$TMPDIR` esa ruta
+    pasa de 160 caracteres y el recorte se comia el `.pyc`, de modo que cargar codigo se
+    reportaba como leer datos: un falso rojo que solo aparecia en la ruta larga.
+    """
+    texto = repr(args)
+    return (not any(s in texto for s in (sys.prefix, sys.base_prefix, sys.executable))
+            and not _es_carga_de_codigo(evento, texto)
+            and not _es_bytecode_por_fd(evento, args))
+
+
 def _sonda(modulo: str) -> int:
     """Run one module's `--self-test` under an audit hook and print the report."""
     import contextlib
@@ -82,7 +97,7 @@ def _sonda(modulo: str) -> int:
 
     def hook(evento: str, args: tuple) -> None:
         if evento in EVENTOS:
-            vistos.append((evento, repr(args)[:160], args))
+            vistos.append((evento, repr(args), args))
 
     sys.addaudithook(hook)
     sys.argv = [f"{modulo}.py", "--self-test"]
@@ -92,10 +107,7 @@ def _sonda(modulo: str) -> int:
             rc = mod.main()
     except SystemExit as exc:
         rc = exc.code
-    ajenos = [[v[0], v[1]] for v in vistos
-              if not any(s in v[1] for s in (sys.prefix, sys.base_prefix, sys.executable))
-              and not _es_carga_de_codigo(v[0], v[1])
-              and not _es_bytecode_por_fd(v[0], v[2])]
+    ajenos = [[v[0], v[1][:160]] for v in vistos if _es_dato(v[0], v[2])]
     print(json.dumps({"modulo": modulo, "rc_self_test": rc, "eventos_vistos": len(vistos),
                       "datos_fuera_de_stdlib": ajenos, "n_datos": len(ajenos),
                       "salida": buf.getvalue().strip()[-120:]}, ensure_ascii=False))
