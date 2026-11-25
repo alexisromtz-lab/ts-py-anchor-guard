@@ -9,6 +9,11 @@ Three checks, each with its own receipt and its own exit code:
 * :mod:`subpixel_probe`  -- how far is one luma profile from another, below one pixel, and
                             does the difference grow with position (anisotropy) or not?
 
+:mod:`live_oracle` is not a fourth check: it is the optional backend that measures the
+reference values by executing the TypeScript source with node, so that a port is compared
+against the engine's own runtime and not against a second implementation of the same
+formula.
+
 Exit codes are the same everywhere: ``0`` conforming, ``1`` diverging (the defect is named),
 ``2`` not measured (never reported as conforming), ``20`` bad invocation.
 
@@ -23,6 +28,7 @@ _MODULOS = {
     "subpixel_probe": ("anisotropia", "fase_subpixel", "perfil_sintetico",
                        "RESOLUCION_PX", "PerfilInvalido"),
     "viewport_embed": ("rect_de", "verificar_1a1", "VentanaNoCabe"),
+    "live_oracle": ("medir", "version_de_nodo"),
 }
 
 __all__ = ["RC_OK", "RC_DIVERGE", "RC_NO_MEDIDO", "RC_ARITY"] + [

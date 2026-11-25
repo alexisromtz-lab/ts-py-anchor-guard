@@ -123,6 +123,40 @@ fila = next(f for f in recibo["anclas"] if f["ancla"] == "PLATE_W")
 assert fila["cuantizacion"] == "round" and fila["residuo_px"]["round"]["residuo"] < 0
 ```
 
+### Backend: measured by the engine's own runtime, or by this module
+
+By default the module evaluates the declarations it reads with its own arithmetic — a
+second implementation of the same formulas, and two implementations can agree because they
+share a misreading of the source. `--backend node` removes the middleman: node strips type
+annotations natively since 22.6, so the `.ts` file is imported and its exported constants
+and pure functions are called directly. No bundler, no `package.json`, no network, no
+browser.
+
+```
+$ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
+    --referencia fixtures/anchors.json
+CONFORME · 21 ancla(s) · 40 punto(s) · peor error absoluto 0.000e+00 · oraculo node v24.15.0
+```
+
+The receipt always names the backend that produced the reference values, because a number
+measured by an interpreter and a number measured by a model of that interpreter are not the
+same evidence. `--backend estatico` forces the model; `--backend node` fails with
+`NO_MEDIDO · SIN_ORACULO_VIVO` when no suitable node is present; `auto`, the default, uses
+node when it can. There is no silent fallback — a mode that was asked for and could not run
+is a gap, not a demotion to the other one.
+
+The two modes do not cover the same population, and both say so. On a 627-line production
+camera module:
+
+| backend | what it measured | verdict |
+|---|---|---|
+| `estatico` | 9 anchors · 10 points | `NO_MEDIDO`, naming the one anchor it refuses (a `reduce`) |
+| `node` | 10 anchors · 12 points | `0.000e+00`, the refused anchor included |
+
+The static reader stays the one that decides *what exists* — a typo or a dotted path that
+resolves to nothing is caught there — and node decides *what it is worth*. Reading and
+measuring are separate claims, so they get separate instruments.
+
 ## `viewport_embed`: the 1:1 invariant
 
 ```python

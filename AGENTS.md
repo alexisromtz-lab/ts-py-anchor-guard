@@ -22,6 +22,12 @@ appear here. The fixtures are synthetic on purpose.
   against the shape it describes. A reader that silently reads 3 of 31 declarations, and a
   reader that raises a traceback instead of reporting a gap, are the same defect — the
   verdict is wrong and it is not visibly wrong.
+- **Reading and measuring are different claims.** The reader decides what exists; the value
+  comes from the engine's own runtime when one is available (`live_oracle`, node ≥ 22.6,
+  type stripping, no bundler). A receipt names the backend, because comparing a port against
+  a second implementation of the same formula is weaker evidence than comparing it against
+  the interpreter that runs it. A requested backend that cannot run is `NO_MEDIDO`; falling
+  back quietly would make the mode undeclared, which is worse than the gap.
 
 ## Style
 

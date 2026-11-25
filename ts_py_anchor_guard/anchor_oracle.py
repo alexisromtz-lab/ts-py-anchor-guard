@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import subprocess
 import sys
 
 RC_OK, RC_DIVERGE, RC_NO_MEDIDO, RC_ARITY = 0, 1, 2, 20
@@ -535,7 +536,8 @@ def residuo_de_redondeo(valor: float) -> dict:
 
 
 def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
-             anclas: dict[str, dict] | None = None) -> dict:
+             anclas: dict[str, dict] | None = None, vivos: dict | None = None,
+             backend: str = "estatico") -> dict:
     """Compare every anchor the reference names against the value it expects.
 
     `referencia` is `{nombre: valor}` for constants or
@@ -543,17 +545,22 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     anchor: how many points were compared, the absolute worst error, its relative value
     and -- when it diverges -- the rounding residual of the measured value plus the policy
     (`floor` / `round` / `ceil`) that reproduces the number the port computed.
+
+    `vivos` carries reference values measured by executing the source (see `live_oracle`);
+    when given they replace this module's arithmetic, which is the point: a port compared
+    against a second implementation of the same formula can agree for the wrong reason.
+    The receipt names the `backend` that produced the numbers.
     """
     if anclas is None:
         if not texto:
             return {"rc": RC_NO_MEDIDO, "causa": "SIN_FUENTE",
                     "detalle": "sin fuente TypeScript que evaluar", "anclas": [],
-                    "no_evaluables": []}
+                    "no_evaluables": [], "backend": backend}
         anclas = extraer_anclas(texto)
     if not anclas:
         return {"rc": RC_NO_MEDIDO, "causa": "SIN_ANCLAS",
                 "detalle": "la fuente no declara ninguna ancla evaluable", "anclas": [],
-                "no_evaluables": []}
+                "no_evaluables": [], "backend": backend}
     filas, divergen, no_medidas, no_evaluables, cache = [], 0, [], [], {}
     for nombre, esperado in referencia.items():
         if nombre.partition(".")[0] not in anclas:
@@ -565,7 +572,12 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
         else:
             puntos, valores = [], [float(esperado)]
         try:
-            obtenidos = evaluar(anclas, nombre, puntos, cache)
+            if vivos is None:
+                obtenidos = evaluar(anclas, nombre, puntos, cache)
+            else:
+                obtenidos = vivos[nombre]
+                if any(o is None for o in obtenidos):
+                    raise FuenteIlegible("el oraculo vivo no da un numero en ese punto")
         except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
             no_evaluables.append({"ancla": nombre, "motivo": str(fallo)})
             continue
@@ -603,21 +615,21 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     if no_medidas:
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_DECLARADA",
                 "detalle": f"la fuente no declara {', '.join(sorted(no_medidas))}",
-                "anclas": filas, "no_evaluables": no_evaluables}
+                "anclas": filas, "no_evaluables": no_evaluables, "backend": backend}
     # A divergence is a measurement and outranks a gap; a gap never degrades to conforming.
     if divergen:
         return {"rc": RC_DIVERGE, "causa": "DIVERGE",
                 "detalle": f"{divergen} punto(s) fuera de tolerancia {tolerancia:g}",
                 "tolerancia": tolerancia, "anclas": filas,
-                "no_evaluables": no_evaluables}
+                "no_evaluables": no_evaluables, "backend": backend}
     if no_evaluables:
         nombres = ", ".join(f["ancla"] for f in no_evaluables)
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_EVALUABLE",
                 "detalle": f"fuera del subconjunto legible: {nombres}",
                 "tolerancia": tolerancia, "anclas": filas,
-                "no_evaluables": no_evaluables}
+                "no_evaluables": no_evaluables, "backend": backend}
     return {"rc": RC_OK, "causa": "", "detalle": "", "tolerancia": tolerancia,
-            "anclas": filas, "no_evaluables": []}
+            "anclas": filas, "no_evaluables": [], "backend": backend}
 
 
 # --------------------------------------------------------------------- anclas
@@ -728,6 +740,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--censo", action="store_true",
                         help="listar las anclas que el lector ve, sin evaluar nada")
+    parser.add_argument("--backend", choices=("auto", "node", "estatico"), default="auto",
+                        help="quien produce los valores de referencia: node ejecuta la "
+                             "fuente, estatico la evalua con este modulo")
     parser.add_argument("--self-test", "--autotest", dest="self_test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
@@ -756,13 +771,34 @@ def main(argv: list[str] | None = None) -> int:
 
     texto = Path(args.fuente).read_text()
     referencia = json.loads(Path(args.referencia).read_text())
-    recibo = comparar(texto, referencia, tolerancia=args.tolerancia)
+    vivos, backend, motivo = None, "estatico", ""
+    if args.backend != "estatico":
+        from . import live_oracle
+
+        nodo = live_oracle.version_de_nodo()
+        if nodo is None:
+            motivo = "node >= 22.6 no esta disponible"
+            if args.backend == "node":
+                print(f"NO_MEDIDO · SIN_ORACULO_VIVO · {motivo}", file=sys.stderr)
+                return RC_NO_MEDIDO
+        else:
+            vivos, motivo = live_oracle.medir(texto, referencia, nodo=nodo)
+            if motivo:
+                # A mode that was asked for and could not run is a gap, not a quiet
+                # demotion to the other backend.
+                print(f"NO_MEDIDO · ORACULO_VIVO_FALLO · {motivo}", file=sys.stderr)
+                return RC_NO_MEDIDO
+            backend = "node " + subprocess.run(
+                [nodo[0], "--version"], capture_output=True, text=True).stdout.strip()
+    recibo = comparar(texto, referencia, tolerancia=args.tolerancia, vivos=vivos,
+                      backend=backend)
     if args.json:
         print(json.dumps(recibo, indent=2, sort_keys=True))
     elif recibo["rc"] == RC_OK:
         total = sum(f["puntos"] for f in recibo["anclas"])
         print(f"CONFORME · {len(recibo['anclas'])} ancla(s) · {total} punto(s) · "
-              f"peor error absoluto {max(f['peor_abs'] for f in recibo['anclas']):.3e}")
+              f"peor error absoluto {max(f['peor_abs'] for f in recibo['anclas']):.3e} · "
+              f"oraculo {recibo['backend']}")
     elif recibo["rc"] == RC_DIVERGE:
         for fila in recibo["anclas"]:
             if not fila["ok"]:
