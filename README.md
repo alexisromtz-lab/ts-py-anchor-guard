@@ -13,8 +13,12 @@ They answer, each with a receipt and an exit code:
 | `subpixel_probe` | How far is one luma profile from another below one pixel, and does the difference grow with position? |
 
 No browser, no GPU, no E2E suite, no third-party dependency. Pure standard-library
-Python, so the checks run in CI in milliseconds and in a fresh clone without installing
-anything.
+Python, so a fresh clone runs the checks without installing anything. Cost per check,
+measured 2026-11-25 on macOS with Python 3.12.13, self-test included: `viewport_embed`
+107 ms, `subpixel_probe` 138 ms, `anchor_oracle` 186 ms, the fixture conformance 975 ms,
+and `live_oracle` 1.49 s because it spawns node twice. So the static checks are hundreds
+of milliseconds and the runtime backend costs about a second and a half — not
+"milliseconds", and still far from a suite that renders frames.
 
 ```console
 $ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
@@ -261,6 +265,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `+0.2499 px at 1/50 px` | `perfil_sintetico(256, fase=0.25)`, analytic sampling | yes |
 | `+0.0004 % per band` | the same pair; the residual of a 3-sine finite window | yes |
 | node `22.6` / `23.5` / `23.6` / `24.15` table | real binaries published on npm, `npx -y node@<version>` | yes, four downloads |
+| per-check cost (`107`–`1490` ms) | wall clock around each `--self-test`, Python 3.12.13, macOS | yes, the clock differs, the order does not |
 | `rc == 0` for a 1:1 embed | exact integer algebra, nothing measured | yes, no process spawned |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
