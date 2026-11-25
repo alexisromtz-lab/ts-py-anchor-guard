@@ -269,7 +269,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `rc == 0` for a 1:1 embed | exact integer algebra, nothing measured | yes, no process spawned |
 | `20` for a bad invocation, in all four CLIs | subprocess exit codes for an unknown flag and for a mistyped `--bandas`, Python 3.12.13 | yes, `python -m unittest tests.test_contrato_cli` |
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
-| `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around `main(["--self-test"])`; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe is 25 lines and the events are what it reports |
+| `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -296,8 +296,24 @@ Three of them — `anchor_oracle`, `subpixel_probe`, `viewport_embed` — open n
 socket while doing it; that is measured with `sys.addaudithook`, not asserted, because the
 first draft of this paragraph claimed it for all four and `live_oracle` contradicted it:
 its self-test writes `fuente.ts` and `probe.mjs` into a temporary directory and runs `node`,
-which is the whole point of the module. Nineteen filesystem events outside `sys.prefix`,
+which is the whole point of the module. Twenty-four filesystem events outside `sys.prefix`,
 against zero in the other three.
+
+The probe is not a snippet in this file, it is [`tools/audit_self_test.py`](tools/audit_self_test.py):
+
+```bash
+$ python tools/audit_self_test.py
+anchor_oracle     0 events · AUTOTEST OK: 33 anclas de oraculo
+live_oracle      24 events · AUTOTEST OK: 7 anclas de oraculo vivo · v24.15.0
+subpixel_probe    0 events · AUTOTEST OK: 9 anclas de subpixel
+viewport_embed    0 events · AUTOTEST OK: 14 anclas de encastre
+$ echo $?          # 1: a module touched data I/O, which is what the table says
+```
+
+Read that `24` as *nonzero*, not as a constant: it counts the writes and pipes of each
+`node` run the fixture performs, so it moves if the fixture does. `0` versus `nonzero` is
+the invariant; the exact number is a property of the fixture, and a test here pins the
+former rather than the latter.
 
 Three of them also take `--json` for the full receipt; `live_oracle` takes no such flag
 because its receipt is JSON unconditionally — a flag that would not change the output is
