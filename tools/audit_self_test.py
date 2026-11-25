@@ -46,6 +46,21 @@ def _es_carga_de_codigo(evento: str, args: str) -> bool:
     return evento == "open" and (".py'" in args or ".pyc" in args or "__pycache__" in args)
 
 
+def _es_bytecode_por_fd(evento: str, args: tuple) -> bool:
+    """`open(3, 'wb')` on a bare descriptor writes a `.pyc`.
+
+    Importing a module for the first time compiles it and writes the bytecode through a
+    descriptor allocator hands out, so the event carries no path and none of the path
+    filters above can see it. It shows up once per clone and then never again, which is
+    exactly the shape of a flake. The child process runs with `-B` so this should not
+    happen at all; the filter stays so that a reader invoking the probe without `-B` gets
+    the same answer.
+    """
+    return (evento == "open" and bool(args) and isinstance(args[0], int)
+            and len(args) > 1 and isinstance(args[1], str)
+            and ("w" in args[1] or "x" in args[1]))
+
+
 def _sonda(modulo: str) -> int:
     """Run one module's `--self-test` under an audit hook and print the report."""
     import contextlib
@@ -63,11 +78,11 @@ def _sonda(modulo: str) -> int:
                           "motivo": "el modulo no expone main()"}))
         return RC_NO_MEDIDO
 
-    vistos: list[tuple[str, str]] = []
+    vistos: list[tuple[str, str, tuple]] = []
 
     def hook(evento: str, args: tuple) -> None:
         if evento in EVENTOS:
-            vistos.append((evento, repr(args)[:160]))
+            vistos.append((evento, repr(args)[:160], args))
 
     sys.addaudithook(hook)
     sys.argv = [f"{modulo}.py", "--self-test"]
@@ -77,9 +92,10 @@ def _sonda(modulo: str) -> int:
             rc = mod.main()
     except SystemExit as exc:
         rc = exc.code
-    ajenos = [list(v) for v in vistos
+    ajenos = [[v[0], v[1]] for v in vistos
               if not any(s in v[1] for s in (sys.prefix, sys.base_prefix, sys.executable))
-              and not _es_carga_de_codigo(*v)]
+              and not _es_carga_de_codigo(v[0], v[1])
+              and not _es_bytecode_por_fd(v[0], v[2])]
     print(json.dumps({"modulo": modulo, "rc_self_test": rc, "eventos_vistos": len(vistos),
                       "datos_fuera_de_stdlib": ajenos, "n_datos": len(ajenos),
                       "salida": buf.getvalue().strip()[-120:]}, ensure_ascii=False))
@@ -87,7 +103,7 @@ def _sonda(modulo: str) -> int:
 
 
 def _medir(modulo: str) -> dict:
-    p = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--sonda", modulo],
+    p = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), "--sonda", modulo],
                        capture_output=True, text=True, timeout=300)
     for linea in reversed(p.stdout.strip().splitlines()):
         try:

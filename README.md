@@ -304,16 +304,24 @@ The probe is not a snippet in this file, it is [`tools/audit_self_test.py`](tool
 ```bash
 $ python tools/audit_self_test.py
 anchor_oracle     0 events · AUTOTEST OK: 33 anclas de oraculo
-live_oracle      24 events · AUTOTEST OK: 7 anclas de oraculo vivo · v24.15.0
+live_oracle      23 events · AUTOTEST OK: 7 anclas de oraculo vivo · v24.15.0
 subpixel_probe    0 events · AUTOTEST OK: 9 anclas de subpixel
 viewport_embed    0 events · AUTOTEST OK: 14 anclas de encastre
 $ echo $?          # 1: a module touched data I/O, which is what the table says
 ```
 
-Read that `24` as *nonzero*, not as a constant: it counts the writes and pipes of each
-`node` run the fixture performs, so it moves if the fixture does. `0` versus `nonzero` is
-the invariant; the exact number is a property of the fixture, and a test here pins the
-former rather than the latter.
+Read the number for `live_oracle` as *nonzero*, not as a constant: it counts the writes and
+pipes of each `node` run the fixture performs, so it moves if the fixture does — the same
+tree reports 23 or 24 depending on whether a bytecode cache already existed. `0` versus
+*nonzero* is the invariant; the exact number is a property of the fixture, and
+`tests/test_audit_self_test.py` pins the former rather than the latter.
+
+Measuring the self-test is itself a case of the problem this package exists to catch. The
+first version of this probe reported 1 event for `anchor_oracle` on a fresh clone and 0
+afterwards, because the first import writes a `.pyc` through a bare file descriptor and the
+event carries no path for a filter to match. The probe now runs each module with `-B`, and
+skips descriptor writes as a second net, so the answer no longer depends on whether the
+clone was warm.
 
 Three of them also take `--json` for the full receipt; `live_oracle` takes no such flag
 because its receipt is JSON unconditionally — a flag that would not change the output is
