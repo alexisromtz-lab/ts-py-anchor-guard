@@ -5,12 +5,16 @@ second implementation of the same formulas, and comparing a port against a secon
 implementation is weaker than comparing it against the engine's own runtime: a shared
 misreading of the source produces agreement.
 
-This module removes the middleman. Node has stripped type annotations natively since
-22.6, so a plain `.ts` file can be imported and its exported constants and pure
-functions called, with no bundler, no `package.json`, no network and no browser. The
-receipt then says which runtime produced the reference values, because a number measured
-by an interpreter and one measured by a model of that interpreter are not the same
-evidence.
+This module removes the middleman. Node strips type annotations natively from 23.6 with no
+flag, and from 22.6 behind `--experimental-strip-types`, so a plain `.ts` file can be
+imported and its exported constants and pure functions called, with no bundler, no
+`package.json`, no network and no browser. Those three boundaries were measured, not cited:
+an `.mjs` probe importing a two-line `.ts` module returns a value under 22.6.0 and 23.5.0
+only with the flag, and under 23.6.0 and 24.15.0 without it. On 23.6 the runtime also emits
+an `ExperimentalWarning` on stderr while exiting 0, which this module tolerates because it
+reads stderr only when the exit code is non-zero. The receipt then says which runtime
+produced the reference values, because a number measured by an interpreter and one measured
+by a model of that interpreter are not the same evidence.
 
 The backend is optional by design. When node is absent or too old the module reports
 `NO_MEDIDO` with the reason; it never silently falls back to the static evaluator, since

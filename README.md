@@ -132,6 +132,24 @@ annotations natively since 22.6, so the `.ts` file is imported and its exported 
 and pure functions are called directly. No bundler, no `package.json`, no network, no
 browser.
 
+#### The runtime threshold, measured rather than cited
+
+The versions below each imported a two-line TypeScript module exporting one constant and one
+pure function from an `.mjs` probe, using the binaries published on npm as
+`npx -y node@<version>`:
+
+| node | without flag | with `--experimental-strip-types` | stderr without flag |
+|---|---|---|---|
+| 22.6.0 | `ERR_UNKNOWN_FILE_EXTENSION` | value | — |
+| 23.5.0 | `ERR_UNKNOWN_FILE_EXTENSION` | value | — |
+| 23.6.0 | value | value | 2 lines (`ExperimentalWarning`) |
+| 24.15.0 | value | value | 0 lines |
+
+Below 22.6 there is no path at all, which is why `version_de_nodo()` returns `None` there and
+`--backend node` answers `NO_MEDIDO · SIN_ORACULO_VIVO` instead of measuring something else.
+The warning on 23.6 goes to stderr and the exit code stays 0; `medir()` reads stderr only when
+the exit code is non-zero, so a warning never degrades a measurement.
+
 ```
 $ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
     --referencia fixtures/anchors.json

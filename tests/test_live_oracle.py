@@ -80,6 +80,27 @@ class BackendDeclaradoTest(unittest.TestCase):
         self.assertEqual(rc, RC_NO_MEDIDO)
 
 
+class FronteraDeVersionTest(unittest.TestCase):
+    """El borde que el README publica, medido con binarios reales desde npx."""
+
+    def test_la_frontera_de_node_es_la_que_el_readme_publica(self):
+        casos = [("v22.5.9", None),
+                 ("v22.6.0", ["--experimental-strip-types"]),
+                 ("v23.5.0", ["--experimental-strip-types"]),
+                 ("v23.6.0", []),
+                 ("v24.15.0", [])]
+        for etiqueta, banderas in casos:
+            with mock.patch.object(live_oracle.shutil, "which",
+                                   return_value="/usr/bin/node"), \
+                 mock.patch.object(live_oracle.subprocess, "run",
+                                   return_value=mock.Mock(stdout=etiqueta + "\n")):
+                obtenido = live_oracle.version_de_nodo()
+            if banderas is None:
+                self.assertIsNone(obtenido, etiqueta)
+            else:
+                self.assertEqual(obtenido, ("/usr/bin/node", banderas), etiqueta)
+
+
 class FuenteRealTest(unittest.TestCase):
     """The shapes a line-based reader got wrong, kept as a regression on the reader."""
 
