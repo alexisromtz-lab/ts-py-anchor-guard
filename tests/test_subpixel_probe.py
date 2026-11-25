@@ -33,6 +33,37 @@ class FaseTest(unittest.TestCase):
         self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
         self.assertEqual(recibo["causa"], "BORDE")
 
+    def test_el_desplazamiento_cabe_siempre_en_media_muestra(self):
+        """The clamp on `delta` cannot be reached, and that is a theorem, not luck.
+
+        With `c0` the minimum of the costs, `c0 <= c_menos` and `c0 <= c_mas`, so
+        `|c_menos - c_mas| <= c_menos - 2*c0 + c_mas`: the parabola vertex never leaves
+        +-0.5. The clamp stays as documentation of the bound, and this test is what makes
+        that claim checkable -- no mutation can kill the clamp, so the invariant is what
+        gets pinned instead.
+        """
+        for fase in (0.0, 0.25, 0.5, -1.5, 3.75):
+            for semillas in ((0.05, 0.113, 0.191), (0.02, 0.07, 0.31)):
+                recibo = fase_subpixel(
+                    perfil_sintetico(400, semillas=semillas),
+                    perfil_sintetico(400, fase=fase, semillas=semillas), max_shift=8)
+                if recibo["rc"] != RC_OK:
+                    continue
+                self.assertLessEqual(abs(recibo["desplazamiento"] - recibo["entero"]), 0.5)
+
+    def test_minimo_en_el_borde_izquierdo_tampoco_es_un_numero(self):
+        """Both edges, not just the right one: a shift of -max_shift is just as unmeasured.
+
+        The right edge was covered and the left was not, so dropping `-max_shift` from the
+        edge test left the suite green while a displacement outside the search window came
+        back as a measurement with `rc=0`.
+        """
+        recibo = fase_subpixel(perfil_sintetico(400), perfil_sintetico(400, fase=-6.0),
+                               max_shift=4)
+        self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "BORDE")
+        self.assertEqual(recibo["entero"], -4)
+
     def test_perfiles_no_relacionados_no_se_declaran_iguales(self):
         base = perfil_sintetico(400)
         ajeno = perfil_sintetico(400, semillas=(0.037, 0.101, 0.229))
@@ -50,6 +81,16 @@ class FaseTest(unittest.TestCase):
 
 
 class AnisotropiaTest(unittest.TestCase):
+    def test_bandas_de_muestras_insuficientes_se_rechazan_por_su_motivo(self):
+        """The reason, not just the exception: a band of 1 sample fails elsewhere too.
+
+        Without this, the guard could be deleted and the test still passed -- the short
+        bands raised `PerfilInvalido` further down, for the wrong reason.
+        """
+        with self.assertRaises(PerfilInvalido) as capturado:
+            anisotropia(perfil_sintetico(128), perfil_sintetico(128), bandas=100)
+        self.assertIn("<32 por banda", str(capturado.exception))
+
     def test_una_escala_0_1_por_ciento_se_mide_en_la_pendiente(self):
         k = 1e-3
         recibo = anisotropia(perfil_sintetico(600), perfil_sintetico(600, escala=1 + k), bandas=6)

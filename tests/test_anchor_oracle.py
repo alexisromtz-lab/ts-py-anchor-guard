@@ -153,6 +153,30 @@ class ComparacionTest(unittest.TestCase):
         self.assertEqual(residuo["ceil"]["valor"], 61)
         self.assertEqual(residuo["round"]["valor"], 61)
 
+    def test_round_es_el_medio_hacia_arriba_y_no_un_sesgo(self):
+        """`floor(x + 0.4)` reports the same policy for most numbers and a different one
+        exactly where the caller is looking: a residual of 0.45 is the case that names the
+        quantiser, and it was the case the fixture did not carry.
+        """
+        residuo = residuo_de_redondeo(0.55)
+        self.assertEqual(residuo["floor"]["valor"], 0)
+        self.assertEqual(residuo["round"]["valor"], 1)
+        self.assertEqual(residuo["ceil"]["valor"], 1)
+        self.assertAlmostEqual(residuo["round"]["residuo"], -0.45, places=12)
+
+    def test_el_error_relativo_se_mide_contra_el_valor_esperado(self):
+        """`peor_rel` is the number a tolerance is argued in, and it was never checked.
+
+        An absolute error of 2 on an expected 1002 is 2.0e-3, not 2.0: reporting the
+        absolute value as relative makes every anchor look a thousand times worse and
+        sends the reader to the wrong cause.
+        """
+        recibo = comparar("export const X = 1000;", {"X": 1002})
+        fila = recibo["anclas"][0]
+        self.assertEqual(recibo["rc"], RC_DIVERGE)
+        self.assertEqual(fila["peor_abs"], 2.0)
+        self.assertAlmostEqual(fila["peor_rel"], 2 / 1002, places=12)
+
 
 class ContratoTest(unittest.TestCase):
     def test_autotest_y_aridad(self):

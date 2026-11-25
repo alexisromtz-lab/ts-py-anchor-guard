@@ -26,6 +26,17 @@ class RectTest(unittest.TestCase):
         with self.assertRaises(VentanaNoCabe):
             rect_de((640, 480), (864, 960))
 
+    def test_un_estiramiento_solo_vertical_es_escala(self):
+        """The aspect ratio has two axes and the check listed only one.
+
+        A rect of the right width and twice the height reports `escala = (1.0, 2.0)`; a
+        check that stops at `escala[0]` calls that 1:1.
+        """
+        recibo = verificar_1a1((1080, 1920), (864, 960), rect=(108, 480, 864, 480))
+        self.assertEqual(recibo["rc"], RC_DIVERGE)
+        self.assertEqual(recibo["causa"], "ESCALA")
+        self.assertEqual(recibo["escala"], [1.0, 2.0])
+
     def test_lienzo_o_ventana_no_enteros_se_rechazan(self):
         for malo in ((1080.5, 1920), (1080, 1920.0), (True, 1920)):
             with self.assertRaises(ValueError):

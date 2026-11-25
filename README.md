@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.2.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.3.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -80,6 +80,11 @@ table says: `20` on a bad invocation instead of `argparse`'s `2`, and `2` for a 
 instead of a traceback that left the process on `1`. A caller that branched on `rc == 1` to
 mean "this port diverges" was getting `1` for "you typed the flag wrong", which is the one
 conflation this package exists to prevent.
+
+`0.3.0` adds no new module and changes no exit code. It adds `tools/mutate.py` and the tests
+that came out of it, so the sentence "the suite would notice if the code were wrong" is a
+number a reader can re-run instead of a claim in a README. The minor version moves because the
+set of shipped files changed, not the contract.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -277,6 +282,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
+| `22` of `25` mutants killed; the other `3` are unreachable by arithmetic | 25 curated single-line mutations of the four modules, each in a fresh copy, every kill repeated on the same copy | yes — `python3 tools/mutate.py`, which ships with the 25 mutations and names the three exemptions |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 
@@ -287,6 +293,66 @@ Two boundaries are declared rather than measured, and no claim here crosses them
 - **`0.000e+00` is agreement between two executables, not proof of a correct engine.** If
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
+
+### What the tests would notice: 25 mutations, 22 killed
+
+A suite can read its fixtures and still assert nothing. The question is not "does this test
+open the fixture" but "if the code were wrong, would anything go red" — so 25 one-line
+mutations were applied to the four modules, each in a fresh copy, each followed by the whole
+suite.
+
+- **17 of 25 died** on the suite as it stood. Five of the eight survivors were live coverage
+  gaps, and each now has a test that fails on the mutant and passes on the code: the left
+  edge of the search window (`-max_shift` was never exercised, only `+max_shift`), the reason
+  a band count is refused (the short bands raised further down, for a different reason, so
+  the guard could be deleted and the test still passed), an aspect stretch on the vertical
+  axis only (`escala[0] == 1.0` was checked, `escala[1]` was not), `round` implemented as
+  `floor(x + 0.4)` (indistinguishable from `floor(x + 0.5)` unless the fraction lands in
+  `(0.4, 0.5)`, which the fixture did not contain), and the relative error reported as the
+  absolute one.
+- **22 of 25 die now**, and the mutation that exposed each gap is part of the record above.
+
+Both numbers come from `tools/mutate.py`, which runs the whole set and prints one line per
+mutant. The `17` is re-measured, not remembered: the same script, run against the tests at the
+previous commit, reports 17 dead, 8 alive, and names the five coverage gaps itself —
+
+```
+huecos de cobertura: sp_borde_izq, sp_bandas_guarda, ve_escala_eje1, ao_round_04, ao_rel_no_relativo
+```
+
+— which is where the list above came from. Against the current tree the same line reads
+`huecos de cobertura: ninguno`, with exit code `0`.
+
+One line is informational rather than a rate: two mutants are killed by a *different* test
+module than the one whose source they edit (the packaged self-test probe catches the flipped
+SSD sign; a CLI test catches the zero-side canvas). Those kills are real, and the script says
+`[ajeno]` so nobody counts them as the site's own coverage.
+
+Two rules make the report trustworthy, and both were learned by getting them wrong:
+
+- **A kill has to reproduce.** Every nonzero run is repeated on the same copy. A mutation that
+  fails once and passes on the second run is reported as `FLAKY`, never as killed — and the
+  script exits `2`, so a flaky run cannot be read as a rate.
+- **A test that asserts the shape of the source cannot judge a mutation of the source.** The
+  first version of the harness shipped its own invariant test (`this pattern appears exactly
+  once`) inside the repository it mutates. With that test in the copy, all 25 mutants died for
+  one reason — the invariant detected the edit — and the report read `25/25 killed`. That is
+  the failure this package exists to catch, reproduced in its own suite: a green that measures
+  the instrument instead of the subject. Two changes came out of it: the harness test is
+  excluded from mutant copies by name, and any kill traced to it now aborts with `2` instead of
+  counting.
+
+**Three mutants cannot be killed by any test, and that is the finding, not an omission.** They
+are guards the arithmetic makes unreachable, so no input distinguishes mutant from original:
+
+| mutant | why no input reaches it |
+|---|---|
+| drop the `+-0.5` clamp on the parabola vertex | with `c0` the minimum cost, `c0 <= c_menos` and `c0 <= c_mas`, hence `abs(c_menos - c_mas) <= c_menos - 2*c0 + c_mas`: the vertex is always inside `+-0.5`. The clamp documents the bound; `test_el_desplazamiento_cabe_siempre_en_media_muestra` pins the invariant instead of the guard |
+| `curvatura <= 0` → `curvatura < 0` | `curvatura == 0` needs `c_menos + c_mas == 2*c0` with `c0` a minimum, i.e. a three-way tie, which exact integer sums can produce only by making the parabola flat everywhere — not with `_ssd` over distinct shifts |
+| allow bands with fewer than 2 samples of overlap | the `2*max_shift + 8 > min(len)` check already refuses those inputs, so the later guard is shadowed by the earlier one from every public entry point |
+
+Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks
+for it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
 
 ## Contract
 
