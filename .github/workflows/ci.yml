@@ -24,6 +24,17 @@ jobs:
           python -m ts_py_anchor_guard.anchor_oracle --self-test
           python -m ts_py_anchor_guard.viewport_embed --self-test
           python -m ts_py_anchor_guard.subpixel_probe --self-test
+      - name: self-test of the live oracle (needs node >= 22.6)
+        run: |
+          # Exit 2 means "no runtime here", which is a gap to announce, not a failure of the
+          # package: this runner can verify the static backend only. Any other code fails.
+          rc=0
+          python -m ts_py_anchor_guard.live_oracle --self-test || rc=$?
+          if [ "$rc" = 2 ]; then
+            echo "::warning title=live oracle not measured::node >= 22.6 unavailable on this runner"
+          elif [ "$rc" != 0 ]; then
+            exit "$rc"
+          fi
       - name: fixtures conform
         run: |
           python -m ts_py_anchor_guard.anchor_oracle \
