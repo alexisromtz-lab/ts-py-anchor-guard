@@ -48,17 +48,28 @@ another from a single pair of rows or columns, at 1/50 px resolution, and separa
 ## Install
 
 **Not on PyPI yet.** `https://pypi.org/pypi/ts-py-anchor-guard/json` answers `404` as of
-2026-11-25, so `pip install ts-py-anchor-guard` fails today. Until a release is uploaded:
+2026-11-25, so `pip install ts-py-anchor-guard` fails today. Two routes do work:
+
+```console
+$ pip install "git+https://github.com/alexisromtz-lab/ts-py-anchor-guard"
+$ python -m ts_py_anchor_guard.anchor_oracle --self-test
+AUTOTEST OK: 33 anclas de oraculo
+```
+
+Measured on 2026-11-25 in an empty venv on Python 3.12.13: the package lands in
+`site-packages` and the self-test exits 0. The same command under Python 3.9.6 is refused
+by pip, which is the intended effect of `requires-python = ">=3.11"` and not a defect.
+
+Or vendored, with nothing installed:
 
 ```console
 $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.1.0`), so the
-`pip install` line becomes true the moment a wheel is published — and not before.
-Python ≥ 3.11, no dependencies. Or vendor the package: each module is standalone,
-importable and has a `main()`.
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.1.0`), so a plain
+`pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
+before. No dependencies. Each module is standalone, importable and has a `main()`.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -244,6 +255,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | claim | measured against | reproducible from a fresh clone |
 |---|---|---|
 | `CONFORME · 21 ancla(s) · 40 punto(s) · 0.000e+00` | `fixtures/engine.ts`, synthetic and self-contained | yes, command above |
+| `pip install "git+https://…"` → `AUTOTEST OK` | empty venv, Python 3.12.13, package resolved into `site-packages` | yes |
 | `10 anchors / 12 points · 0.000e+00` on a 627-line module | a real camera engine, executed by node, read-only, **outside this repository** | **no** — that source is not redistributed. The receipt is the evidence; the run is not |
 | object literals and `??` read, block bodies refused | `fixtures/engine.ts`, which reproduces those shapes | yes |
 | `+0.2499 px at 1/50 px` | `perfil_sintetico(256, fase=0.25)`, analytic sampling | yes |
