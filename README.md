@@ -267,6 +267,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | node `22.6` / `23.5` / `23.6` / `24.15` table | real binaries published on npm, `npx -y node@<version>` | yes, four downloads |
 | per-check cost (`107`–`1490` ms) | wall clock around each `--self-test`, Python 3.12.13, macOS | yes, the clock differs, the order does not |
 | `rc == 0` for a 1:1 embed | exact integer algebra, nothing measured | yes, no process spawned |
+| `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 
@@ -287,8 +288,10 @@ Two boundaries are declared rather than measured, and no claim here crosses them
 | `2` | not measured — never reported as conforming |
 | `20` | bad invocation |
 
-Every module also has `--json` (the full receipt) and `--self-test` (its own anchors, run
-against synthetic fixtures, no filesystem or network).
+All four modules have `--self-test` (their own anchors, run against synthetic fixtures, no
+filesystem or network). Three of them also take `--json` for the full receipt;
+`live_oracle` takes no such flag because its receipt is JSON unconditionally — a flag that
+would not change the output is one more thing to keep true.
 
 ## Tests
 
