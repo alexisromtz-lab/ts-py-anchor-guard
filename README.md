@@ -47,12 +47,18 @@ another from a single pair of rows or columns, at 1/50 px resolution, and separa
 
 ## Install
 
+**Not on PyPI yet.** `https://pypi.org/pypi/ts-py-anchor-guard/json` answers `404` as of
+2026-11-25, so `pip install ts-py-anchor-guard` fails today. Until a release is uploaded:
+
 ```console
-$ pip install ts-py-anchor-guard
+$ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
+$ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-Python ≥ 3.11. No dependencies. Or just vendor the package: each module is standalone,
-importable, and has a `main()`.
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.1.0`), so the
+`pip install` line becomes true the moment a wheel is published — and not before.
+Python ≥ 3.11, no dependencies. Or vendor the package: each module is standalone,
+importable and has a `main()`.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -193,10 +199,25 @@ shrinking changes the scale the destination engine uses.
 
 ## `subpixel_probe`: phase and anisotropy from one pair of profiles
 
+```python
+from ts_py_anchor_guard.subpixel_probe import perfil_sintetico, fase_subpixel, anisotropia
+
+a = perfil_sintetico(256, fase=0.0)
+b = perfil_sintetico(256, fase=0.25)      # a quarter of a pixel to the right
+fase_subpixel(a, b)["desplazamiento"]     # 0.24987121564142314  -> +0.2499 px
+anisotropia(a, b)["error_de_escala"]      # 4.348604381017845e-06 -> +0.0004 % per band
+```
+
+The same pair written to disk gives the same two numbers from the CLI:
+
 ```console
 $ python -m ts_py_anchor_guard.subpixel_probe --a a.txt --b b.txt
-+0.2498 px (50/px de resolucion) · error de escala +0.0000 % por banda
++0.2499 px (50/px de resolucion) · error de escala +0.0004 % por banda
 ```
+
+The `+0.0004 %` is real and is printed instead of being folded into a tolerance: three
+sines sampled over a finite window are not exactly band-limited, so a pure translation
+recovers as a scale error of about 4·10⁻⁶ per band rather than as zero.
 
 The integer minimum of the sum of squared differences is refined by the vertex of the
 parabola through its three neighbouring costs. A flat or inverted parabola means the
@@ -213,6 +234,32 @@ itself: three incommensurable sines, sampled analytically at a fractional offset
 is the estimator's and not an interpolation's. Frequencies above Nyquist are rejected —
 aliasing makes a sub-pixel offset and an integer one cost the same, which would let a
 broken estimator look right for the wrong reason.
+
+## What each claim rests on
+
+A verification tool that lets its own numbers pass unexamined is asking for the trust it
+does not extend. Every quantitative claim above is listed here with the population it was
+measured on, and whether a reader can reproduce it from a fresh clone.
+
+| claim | measured against | reproducible from a fresh clone |
+|---|---|---|
+| `CONFORME · 21 ancla(s) · 40 punto(s) · 0.000e+00` | `fixtures/engine.ts`, synthetic and self-contained | yes, command above |
+| `10 anchors / 12 points · 0.000e+00` on a 627-line module | a real camera engine, executed by node, read-only, **outside this repository** | **no** — that source is not redistributed. The receipt is the evidence; the run is not |
+| object literals and `??` read, block bodies refused | `fixtures/engine.ts`, which reproduces those shapes | yes |
+| `+0.2499 px at 1/50 px` | `perfil_sintetico(256, fase=0.25)`, analytic sampling | yes |
+| `+0.0004 % per band` | the same pair; the residual of a 3-sine finite window | yes |
+| node `22.6` / `23.5` / `23.6` / `24.15` table | real binaries published on npm, `npx -y node@<version>` | yes, four downloads |
+| `rc == 0` for a 1:1 embed | exact integer algebra, nothing measured | yes, no process spawned |
+
+Two boundaries are declared rather than measured, and no claim here crosses them:
+
+- **No browser and no compositor are observed.** `subpixel_probe` measures profiles you give
+  it. Whether a real compositor snaps layers to integer pixels, and at what phase, is a
+  property of that compositor, measured elsewhere; this package can feed the measurement but
+  cannot stand in for it.
+- **`0.000e+00` is agreement between two executables, not proof of a correct engine.** If
+  the TypeScript source is wrong, both the source and the port are wrong together, and the
+  verifier is silent by construction. It answers "same function", never "right function".
 
 ## Contract
 
