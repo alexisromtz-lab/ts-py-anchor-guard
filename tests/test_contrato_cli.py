@@ -85,3 +85,26 @@ class ReciboDeDesborde(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VersionDeclarada(unittest.TestCase):
+    """`__version__` and `pyproject.toml` are two copies of one fact.
+
+    They were already the same string by luck, which is the same guarantee as no guarantee.
+    """
+
+    def test_version_coincide_con_pyproject(self):
+        import re
+        from pathlib import Path as _P
+
+        import ts_py_anchor_guard as paquete
+
+        raiz = _P(__file__).resolve().parents[1]
+        texto = (raiz / "pyproject.toml").read_text(encoding="utf-8")
+        try:
+            import tomllib
+            declarada = tomllib.loads(texto)["project"]["version"]
+        except ImportError:  # 3.9/3.10: the package needs 3.11, its tests outlive that
+            seccion = texto.split("[project]", 1)[1].split("\n[", 1)[0]
+            declarada = re.search(r'^version\s*=\s*"([^"]+)"', seccion, re.M).group(1)
+        self.assertEqual(paquete.__version__, declarada)

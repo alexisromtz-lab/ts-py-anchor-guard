@@ -71,9 +71,15 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.1.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.2.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
+
+The minor version moved from `0.1.0` to `0.2.0` once the exit codes started meaning what the
+table says: `20` on a bad invocation instead of `argparse`'s `2`, and `2` for a missing input
+instead of a traceback that left the process on `1`. A caller that branched on `rc == 1` to
+mean "this port diverges" was getting `1` for "you typed the flag wrong", which is the one
+conflation this package exists to prevent.
 
 ## `anchor_oracle`: exact arithmetic parity
 
