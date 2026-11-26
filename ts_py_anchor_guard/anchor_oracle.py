@@ -541,10 +541,15 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     """Compare every anchor the reference names against the value it expects.
 
     `referencia` is `{nombre: valor}` for constants or
-    `{nombre: {"puntos": [...], "valores": [...]}}` for functions. The receipt lists, per
+    `{nombre: {"puntos": [...], "valores": [...]}}` for functions. A `valor` that is a
+    literal (a list, an object) is not a measurement: it is reported per anchor with the
+    path that would measure it (`RAMPA.0`, `CUADRO.ancho`), never coerced and never allowed
+    to abort the anchors that did come back as numbers. The receipt lists, per
     anchor: how many points were compared, the absolute worst error, its relative value
     and -- when it diverges -- the rounding residual of the measured value plus the policy
-    (`floor` / `round` / `ceil`) that reproduces the number the port computed.
+    (`floor` / `round` / `ceil`) that reproduces the number the port computed. `cobertura`
+    publishes the scope: how many anchors the source declares, how many were compared, and
+    which ones the reference never named.
 
     `vivos` carries reference values measured by executing the source (see `live_oracle`);
     when given they replace this module's arithmetic, which is the point: a port compared
@@ -578,11 +583,21 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
         if nombre.partition(".")[0] not in anclas:
             no_medidas.append(nombre)
             continue
-        if isinstance(esperado, dict):
-            puntos = [None if p is None else float(p) for p in esperado["puntos"]]
-            valores = [float(v) for v in esperado["valores"]]
-        else:
-            puntos, valores = [], [float(esperado)]
+        try:
+            if isinstance(esperado, dict):
+                puntos = [None if p is None else float(p) for p in esperado["puntos"]]
+                valores = [float(v) for v in esperado["valores"]]
+            else:
+                puntos, valores = [], [float(esperado)]
+        except (KeyError, TypeError, ValueError):
+            # The source side already refuses to compare a literal; the reference side
+            # used to raise out of `float()` and take the whole receipt with it, so one
+            # array in a production port reported nothing about the anchors that did
+            # match. Same guard, both sides of the comparison.
+            no_evaluables.append({"ancla": nombre, "motivo": (
+                f"la referencia da {type(esperado).__name__}: nombra un campo o un "
+                f"indice (`{nombre}.campo`, `{nombre}.0`)")})
+            continue
         try:
             if vivos is None:
                 obtenidos = evaluar(anclas, nombre, puntos, cache)
@@ -624,24 +639,37 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
                     else None)
                 divergen += 1
         filas.append(fila)
+    # A green over a hand-picked subset of the anchors is still a measurement of that
+    # subset and nothing else, so the receipt says which names it never looked at: on a
+    # real 7-anchor engine the first dogfooding run returned `rc 0` over 3 of them and no
+    # field carried the other 4. `omitidas` is that field. It reports, it does not fail:
+    # a reference is allowed to be a subset, it is not allowed to be silently smaller.
+    cubiertas = {f["ancla"].partition(".")[0] for f in filas}
+    cubiertas.update(f["ancla"].partition(".")[0] for f in no_evaluables)
+    cobertura = {"declaradas": len(anclas), "comparadas": len(filas),
+                 "omitidas": sorted(n for n in anclas if n not in cubiertas)}
     if no_medidas:
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_DECLARADA",
                 "detalle": f"la fuente no declara {', '.join(sorted(no_medidas))}",
-                "anclas": filas, "no_evaluables": no_evaluables, "backend": backend}
+                "anclas": filas, "no_evaluables": no_evaluables, "backend": backend,
+                "cobertura": cobertura}
     # A divergence is a measurement and outranks a gap; a gap never degrades to conforming.
     if divergen:
         return {"rc": RC_DIVERGE, "causa": "DIVERGE",
                 "detalle": f"{divergen} punto(s) fuera de tolerancia {tolerancia:g}",
                 "tolerancia": tolerancia, "anclas": filas,
-                "no_evaluables": no_evaluables, "backend": backend}
+                "no_evaluables": no_evaluables, "backend": backend,
+                "cobertura": cobertura}
     if no_evaluables:
         nombres = ", ".join(f["ancla"] for f in no_evaluables)
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_EVALUABLE",
                 "detalle": f"fuera del subconjunto legible: {nombres}",
                 "tolerancia": tolerancia, "anclas": filas,
-                "no_evaluables": no_evaluables, "backend": backend}
+                "no_evaluables": no_evaluables, "backend": backend,
+                "cobertura": cobertura}
     return {"rc": RC_OK, "causa": "", "detalle": "", "tolerancia": tolerancia,
-            "anclas": filas, "no_evaluables": [], "backend": backend}
+            "anclas": filas, "no_evaluables": [], "backend": backend,
+            "cobertura": cobertura}
 
 
 # --------------------------------------------------------------------- anclas

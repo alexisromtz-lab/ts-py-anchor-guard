@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.6.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.7.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -181,6 +181,16 @@ promises are measured rather than asserted. The same run named a defect the matr
 runner's `python3` is `3.14.4`, while the matrix certified `3.11` through `3.13`, so a caller
 could adopt a version this project had never exercised; `3.14` is in the matrix now. The minor
 moves because the set of files changed; no exit code did.
+
+`0.7.0` is the first run against an engine that already shipped instead of against a fixture: a
+`627`-line TypeScript file and its `831`-line Python port, no adapters and no edits on either
+side, nine numbers compared at `peor_rel 0.0` — so the two implementations of the same law are
+bit-identical and nothing had ever said so. It also cost three things that are now in the code:
+a vector in the reference used to raise out of `float()` and take the whole receipt with it; a
+green over a subset of the declared anchors carried no field saying which ones it skipped; and
+a renamed anchor (`NUDOS_S5` in TypeScript, `RAMPA_S5` in the port) is absent from every receipt
+rather than counted as a hole. The minor moves because the receipt gained `cobertura` and one
+failure became a named row; no exit code changed.
 
 ## Use as a GitHub Action
 
@@ -365,6 +375,9 @@ verifier:
 
 Precedence in the receipt: a measured divergence (`RC 1`) outranks a gap (`RC 2`), because
 a number that is wrong is a fact while a number that is unreadable is a hole in the census.
+`cobertura` publishes the scope of every receipt — how many anchors the source declares, how
+many were compared, and which ones the reference never named — because a green over a subset
+is a measurement of that subset and of nothing else.
 
 `--censo` prints exactly the population the reader sees — useful to keep the acceptance set
 honest when the source grows:
@@ -387,6 +400,43 @@ assert recibo["rc"] == 1
 fila = next(f for f in recibo["anclas"] if f["ancla"] == "PLATE_W")
 assert fila["cuantizacion"] == "round" and fila["residuo_px"]["round"]["residuo"] < 0
 ```
+
+### Measured on an engine that had already shipped: nine numbers, `peor_rel 0.0`
+
+Every example above is a fixture. The first run against real code was a TypeScript engine and
+its Python port of the same law — `paneo.ts` (627 lines), `transicion.ts` (163),
+`modelo-paneo.py` (831) and `predice-transicion.py` (1 846) — with no adapter and no edit on
+either side (`video/letras-video`, 26-Nov-2026, version `0.7.0`):
+
+| TypeScript declares | Python computes | path measured | `peor_rel` |
+|---|---|---|---|
+| `RAMPA_MEDIDA = [0.453, 0.764, 1]` | `(0.453, 0.764, 1.0)` | `RAMPA_MEDIDA.0` … `.2` | `0.0` |
+| `CUADRO = { ancho: 1080, alto: 1920 }` | `(1080, 1920)` | `CUADRO.ancho`, `.alto` | `0.0` |
+| `VENTANA = { ancho: 864, alto: 960 }` | `(864, 960)` | `VENTANA.ancho`, `.alto` | `0.0` |
+| `PLACAS.compass.nativo = [768, 1344]` | `{"compass": [768, 1344]}` | `PLACAS.compass.nativo.0/.1` | `0.0` |
+
+Nine numbers, `rc 0`. Four things the run cost, all of them now in the code or in this file:
+
+- **A vector in the reference used to kill the whole receipt.** `float(esperado)` ran outside
+  the guard, so a port that hands back `RAMPA_MEDIDA = (0.453, 0.764, 1.0)` raised `TypeError`
+  and the file's scalars were never reported — `NO_MEDIDO` with a traceback instead of a named
+  gap. The source side already refused literals by name; the reference side does too now, and
+  the remedy is the path it prints.
+- **A green over a subset carried no scope.** The first successful run returned `rc 0` over `3`
+  of the `7` anchors that file declares, and no field said so. Hence `cobertura`. It reports;
+  it does not fail — a reference may be a subset, it may not be silently smaller.
+- **Shape is not derivable, and guessing it would be a false green.** TypeScript `CUADRO` is
+  an object, Python `CUADRO` is a tuple. Named `CUADRO.0` it is refused (`ANCLA_NO_EVALUABLE`),
+  never matched by position; named `CUADRO.ancho` it measures. Stating that correspondence once,
+  per repository, is the caller's work: a tool that inferred it would be inventing the mapping
+  it claims to verify.
+- **A renamed anchor is invisible.** The same ramp is `NUDOS_S5` in TypeScript and `RAMPA_S5`
+  in the port. Comparison is by name, so that pair is neither a pass nor a failure — it is
+  absent from every receipt. `cobertura.omitidas` is what makes the absence visible.
+
+Drift is caught at the scale this engine cares about: shifting `RAMPA_MEDIDA.0` by `0.001`
+returns `RC 1 · DIVERGE` with `peor_abs 0.001`, `peor_rel 0.002203` and the rounding residual
+of the measured value.
 
 ### Backend: measured by the engine's own runtime, or by this module
 

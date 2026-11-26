@@ -178,6 +178,40 @@ class ComparacionTest(unittest.TestCase):
         self.assertEqual(fila["peor_abs"], 2.0)
         self.assertAlmostEqual(fila["peor_rel"], 2 / 1002, places=12)
 
+    def test_una_referencia_con_un_vector_no_tumba_las_demas_anclas(self):
+        """One array in the reference used to take the whole receipt with it.
+
+        `float(esperado)` ran outside the guard, so a production port that hands back
+        `RAMPA_MEDIDA = (0.453, 0.764, 1.0)` raised `TypeError` and the file's scalar
+        anchors were never reported -- a `NO_MEDIDO` with a traceback instead of a named
+        gap. The remedy is already in the contract: an indexed path measures the element.
+        """
+        fuente = "export const RAMPA = [0.453, 0.764, 1];\nconst K = 3;\n"
+        recibo = comparar(fuente, {"RAMPA": [0.453, 0.764, 1.0], "K": 3.0})
+        self.assertEqual(recibo["rc"], RC_NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "ANCLA_NO_EVALUABLE")
+        self.assertEqual([f["ancla"] for f in recibo["anclas"]], ["K"])
+        self.assertIn("RAMPA.0", recibo["no_evaluables"][0]["motivo"])
+        medido = comparar(fuente, {"RAMPA.0": 0.453, "RAMPA.2": 1.0, "K": 3.0})
+        self.assertEqual(medido["rc"], RC_OK)
+        self.assertEqual([f["ancla"] for f in medido["anclas"]],
+                         ["RAMPA.0", "RAMPA.2", "K"])
+
+    def test_el_recibo_declara_la_cobertura_que_no_uso(self):
+        """A green over a subset is a green over that subset, and the receipt must say so.
+
+        Measured on a real engine: `rc 0` came back over 3 of 7 declared anchors and no
+        field carried the other 4, so a reader could not tell a full pass from a pass over
+        the one anchor that happened to have a Python counterpart with the same name.
+        """
+        fuente = "export const A = 1;\nconst B = 2;\nconst f = (u) => u;\n"
+        recibo = comparar(fuente, {"A": 1.0})
+        self.assertEqual(recibo["rc"], RC_OK)
+        self.assertEqual(recibo["cobertura"],
+                         {"declaradas": 3, "comparadas": 1, "omitidas": ["B", "f"]})
+        completo = comparar(fuente, {"A": 1.0, "B": 2.0})
+        self.assertEqual(completo["cobertura"]["omitidas"], ["f"])
+
 
 class ContratoTest(unittest.TestCase):
     def test_autotest_y_aridad(self):
