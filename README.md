@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.5.1`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.6.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -169,6 +169,18 @@ observable there. The exemption is now declared by that measurement instead of b
 by a rate, which means the report says `44` and `45` on the interpreter that produces each.
 The patch moves because a return path was measured, two strings were corrected and a rate
 gained its subject; no exit code changed.
+
+`0.6.0` adds `consumers/v0/`, the harness that pins the published tag from a repository that is
+not this one. Every run up to here executed `uses: ./`, which measures the action but not what a
+stranger gets: a tag, a tarball, an extraction, and a composite whose `PYTHONPATH` points at a
+directory the caller never sees. Run `45852973521` walked that path in a throwaway repository on
+a stock `ubuntu-latest` and returned three receipts — `0` with `"backend": "estatico"` and
+`"peor_rel": 0.0`, `1` with `DIVERGE` from a step that went red while the `receipt-file` it wrote
+stayed readable, and `0` from `auto`, which chose `node v24.22.3` — so the five lines this file
+promises are measured rather than asserted. The same run named a defect the matrix had: the
+runner's `python3` is `3.14.4`, while the matrix certified `3.11` through `3.13`, so a caller
+could adopt a version this project had never exercised; `3.14` is in the matrix now. The minor
+moves because the set of files changed; no exit code did.
 
 ## Use as a GitHub Action
 
@@ -296,6 +308,16 @@ instant one is cut. Ask `git ls-remote --tags` instead.
 ```yaml
 uses: alexisromtz-lab/ts-py-anchor-guard@v0
 ```
+
+**Measured from outside, once.** Everything above runs `uses: ./`. Run `45852973521` pinned the
+tag from a throwaway repository that this project does not own (`ubuntu-latest`, `2026-11-26`):
+`check=anchor`, `backend: estatico`, `{"TASA": 0.15}` against a source of `0.15` returned `0` with
+`"peor_rel": 0.0`; the same pair with the reference displaced to `0.25` returned `1` with
+`causa: DIVERGE` and left its `receipt-file` readable after the step went red; and the same
+positive inputs with no `backend` declared returned `0` from `auto`, which selected
+`node v24.22.3`. That repository was deleted after the run, so the link is a record of what
+happened rather than a page: the reproducible artifact is `consumers/v0/`, byte-identical to what
+ran, and its `README.md` says how to push it to a repository of your own in four commands.
 
 ## `anchor_oracle`: exact arithmetic parity
 

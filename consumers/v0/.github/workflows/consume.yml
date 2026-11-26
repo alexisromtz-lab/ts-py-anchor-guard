@@ -1,0 +1,90 @@
+name: consume-v0
+
+# A throwaway consumer: it exists to measure `uses: alexisromtz-lab/ts-py-anchor-guard@v0`
+# from outside the repository that produces the action. Nothing here is a product.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  consumir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: quien es el node del runner
+        run: |
+          echo "node: $(command -v node || echo NO_HAY_NODE)"
+          node --version || true
+          python3 --version
+
+      - id: ok
+        name: positivo - backend estatico
+        uses: alexisromtz-lab/ts-py-anchor-guard@v0
+        with:
+          check: anchor
+          source: config.ts
+          reference: ref_ok.json
+          backend: estatico
+          receipt-file: /tmp/recibo_ok.txt
+
+      - name: positivo - aserciones
+        run: |
+          python3 -c "
+          import json
+          line = [l for l in open('/tmp/recibo_ok.txt') if l.startswith('receipt=')][0]
+          d = json.loads(line[len('receipt='):])
+          assert d['rc'] == 0, d
+          assert d['backend'] == 'estatico', d
+          assert d['anclas'][0]['peor_rel'] == 0.0, d
+          print('positivo OK: rc=0 backend=estatico peor_rel=0.0 sobre', d['anclas'][0]['ancla'])
+          "
+
+      - id: drift
+        name: negativo - la referencia se desplazo 0.10
+        continue-on-error: true
+        uses: alexisromtz-lab/ts-py-anchor-guard@v0
+        with:
+          check: anchor
+          source: config.ts
+          reference: ref_drift.json
+          backend: estatico
+          receipt-file: /tmp/recibo_drift.txt
+
+      - name: negativo - aserciones
+        run: |
+          test "${{ steps.drift.outcome }}" = "failure"
+          test -s /tmp/recibo_drift.txt
+          python3 -c "
+          import json
+          line = [l for l in open('/tmp/recibo_drift.txt') if l.startswith('receipt=')][0]
+          d = json.loads(line[len('receipt='):])
+          assert d['rc'] == 1, d
+          assert d['causa'] == 'DIVERGE', d
+          print('negativo OK: el step fallo, el recibo sobrevivio con rc=1 causa=DIVERGE')
+          "
+
+      - id: por_defecto
+        name: default - backend auto, la promesa de cinco lineas
+        continue-on-error: true
+        uses: alexisromtz-lab/ts-py-anchor-guard@v0
+        with:
+          check: anchor
+          source: config.ts
+          reference: ref_ok.json
+          receipt-file: /tmp/recibo_auto.txt
+
+      - name: default - publicar lo medido
+        run: |
+          {
+            echo '### default (backend: auto, sin declararlo)'
+            echo ''
+            echo "- outcome: ${{ steps.por_defecto.outcome }}"
+            echo "- rc: ${{ steps.por_defecto.outputs.rc }}"
+            echo ''
+            echo '```'
+            cut -c1-900 /tmp/recibo_auto.txt 2>/dev/null || echo 'SIN_RECIBO_EN_DISCO'
+            echo ''
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "auto: outcome=${{ steps.por_defecto.outcome }} rc=${{ steps.por_defecto.outputs.rc }}"
