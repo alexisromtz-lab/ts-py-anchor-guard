@@ -56,7 +56,9 @@ appear here. The fixtures are synthetic on purpose.
   the `node` call, so a temp filesystem out of space escaped as `OSError` and read as a failure
   of the package — three times in 72 stress passes. Every state the package cannot measure
   leaves through `({}, motivo)`; a `try` that covers the external process but not the scratch
-  writes around it covers the wrong half.
+  writes around it covers the wrong half. The harness applies the same rule to itself: with
+  less than 64 MiB free it returns `NO_MEDIDO` instead of a table, because a red that comes
+  from the disk is indistinguishable from a red that comes from the mutation.
 
 ## Style
 

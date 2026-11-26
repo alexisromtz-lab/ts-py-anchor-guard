@@ -36,6 +36,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 RC_OK, RC_SOBREVIVE, RC_NO_MEDIDO, RC_ARITY = 0, 1, 2, 20
 
+# Each copy of the tree is about 1 MiB, and a mutant holds two of them at once. Below this the
+# temp filesystem starts answering `OSError: [Errno 28]` while the suite writes its own scratch
+# files, and a red that comes from the disk is indistinguishable from a red that comes from the
+# mutation: the run has to refuse before it produces verdicts it cannot pay for.
+LIBRE_MINIMO = 64 * 1024 * 1024
+
 # (id, module, original text, mutated text, why the mutation matters)
 MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
     ("sp_delta_signo", "ts_py_anchor_guard/subpixel_probe.py",
@@ -200,6 +206,14 @@ INALCANZABLES = {
 }
 
 
+def _libre(ruta: Path) -> int | None:
+    """Free bytes on the filesystem holding `ruta`, or `None` if it cannot be asked."""
+    try:
+        return shutil.disk_usage(ruta).free
+    except OSError:
+        return None
+
+
 def _copiar(destino: Path) -> None:
     if destino.exists():
         shutil.rmtree(destino)
@@ -297,6 +311,13 @@ def main(argv: list[str]) -> int:
         return RC_ARITY
 
     with tempfile.TemporaryDirectory(prefix="mut-") as tmp:
+        libre = _libre(Path(tmp))
+        if libre is None or libre < LIBRE_MINIMO:
+            cuanto = "NO_MEDIDO" if libre is None else f"{libre // (1024 * 1024)} MiB"
+            print(f"NO_MEDIDO · el disco temporal tiene {cuanto} y la corrida necesita "
+                  f"{LIBRE_MINIMO // (1024 * 1024)} MiB: una suite sin sitio produce rojos que "
+                  f"no son del mutante", file=sys.stderr)
+            return RC_NO_MEDIDO
         base = Path(tmp) / "base"
         _copiar(base)
         rc, err = _correr(base)

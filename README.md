@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.2`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.3`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -99,7 +99,12 @@ through a descriptor, neither of which any run can display, because the child ru
 One test now feeds those events straight to the predicate. The patch moves because the harness
 grew and the shipped files did not.
 
-`0.4.2` fixes the only place where `live_oracle` could still raise instead of answering. A
+`0.4.3` is the half of that fix the harness was missing. The free-space condition is now
+checked before the first copy is made: under 64 MiB free, `mutate.py` prints `NO_MEDIDO` with
+the amount it found and returns `2`, instead of running 38 copies of a suite that will go red
+for the disk. Two tests pin it — one for a full filesystem, one for a `disk_usage` that cannot
+answer at all.
+ the only place where `live_oracle` could still raise instead of answering. A
 stress run of the suite under parallel load failed three times in 72 passes with
 `OSError: [Errno 28] No space left on device` — the machine's temp filesystem, at 121 MiB free,
 refused the two files `medir()` writes into its scratch box. `medir()` wrapped only the `node`
@@ -347,6 +352,12 @@ probes), each in a fresh copy, each followed by the whole suite.
   straight to the predicate, with a `.ts` write as the positive control.
 - **34 of 38 die now.** The four survivors are the declared ones in the table below, and the
   script reports `huecos de cobertura: ninguno` — zero undeclared holes — with exit code `0`.
+- **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
+  deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
+  the mutation table and would "kill" any edit to it — the exact dead end this section exists to
+  catch. The cost is that the instrument's own guards, including the free-space refusal added in
+  `0.4.2`, are pinned by tests the instrument cannot measure. A mutant on `tools/mutate.py`
+  would report `VIVO` for want of a judge, which is why none is listed.
 - **The last mutant came from the environment, not from a review.** A stress run of the suite
   under six parallel loops failed three times in 72 passes with `Errno 28: No space left on
   device`, raised while `medir()` wrote its two scratch files. Wrapping only the `node` call

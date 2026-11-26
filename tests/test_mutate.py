@@ -14,8 +14,11 @@ are compared by the set of failing tests with the copy's own location normalised
 from __future__ import annotations
 
 import importlib.util
+import io
+import shutil
 import unittest
 from pathlib import Path
+from unittest import mock
 
 RAIZ = Path(__file__).resolve().parents[1]
 _ESPEC = importlib.util.spec_from_file_location("mutate", RAIZ / "tools" / "mutate.py")
@@ -45,6 +48,24 @@ class ObjetivosVivos(unittest.TestCase):
 
     def test_una_bandera_desconocida_es_invocacion_mala(self):
         self.assertEqual(mutate.main(["--mutar-todo"]), mutate.RC_ARITY)
+
+    def test_sin_sitio_en_el_disco_temporal_no_se_emite_ningun_veredicto(self):
+        """A suite that cannot write its own scratch files goes red for the disk, not for the
+        mutation: the run has to refuse before it produces a table it cannot pay for."""
+        poco = shutil.disk_usage(".")._replace(free=1024)
+        with mock.patch.object(mutate.shutil, "disk_usage", return_value=poco):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = mutate.main(["sp_sin_clamp"])
+        self.assertEqual(rc, mutate.RC_NO_MEDIDO)
+        self.assertIn("NO_MEDIDO", err.getvalue())
+        self.assertIn("MiB", err.getvalue())
+
+    def test_una_guarda_que_no_puede_preguntar_el_espacio_tampoco_emite_veredicto(self):
+        with mock.patch.object(mutate.shutil, "disk_usage", side_effect=OSError(1, "sin ruta")):
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                rc = mutate.main(["sp_sin_clamp"])
+        self.assertEqual(rc, mutate.RC_NO_MEDIDO)
+        self.assertIn("NO_MEDIDO", err.getvalue())
 
 
 class VeredictoTest(unittest.TestCase):
