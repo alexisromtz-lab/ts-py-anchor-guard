@@ -39,3 +39,35 @@ jobs:
         run: |
           python -m ts_py_anchor_guard.anchor_oracle \
             --fuente fixtures/engine.ts --referencia fixtures/anchors.json
+
+  action:
+    # The action is the product's front door: if it is only tested by hand, it is not tested.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: self-test de cada modulo a traves de la action
+        uses: ./
+        with:
+          check: anchor
+          self-test: true
+      - name: embed self-test
+        uses: ./
+        with:
+          check: embed
+          self-test: true
+      - name: probe self-test
+        uses: ./
+        with:
+          check: probe
+          self-test: true
+      - name: anclas reales contra el motor sintetico
+        id: oraculo
+        uses: ./
+        with:
+          check: anchor
+          source: fixtures/engine.ts
+          reference: fixtures/anchors.json
+      - name: el RC sale como output y como codigo
+        run: |
+          echo "rc declarado: ${{ steps.oraculo.outputs.rc }}"
+          test "${{ steps.oraculo.outputs.rc }}" = "0"

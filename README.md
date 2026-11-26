@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.3`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.5.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -140,6 +140,71 @@ last line containing `Error` and falls back to the last one. Two tests written f
 passed for the wrong reason before they were fixed: one fed `None` as the reference, so the
 probe never read the export, and one asserted only the exit code while a second negative control
 fired on the same sabotage.
+
+`0.5.0` adds a file rather than a return path: `action.yml`, a composite action that runs this
+package inside a workflow without installing it, exits with the module's own code and publishes
+`rc` and `receipt` as outputs. The minor moves because the set of files changed, which is the
+rule this project has followed since `0.2.0`. The action reuses the same `main()` entry points the
+CLI already exposed, so no contract changed; what it removes is the gap between "the tool works"
+and "a caller can adopt it in five lines". Four of its seven invocation paths are measured in the
+table above and one of them, the `uses: ./` job, only becomes evidence when CI runs it.
+
+## Use as a GitHub Action
+
+`action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
+and exits with the module's own code, so a divergence fails the step instead of colouring a log.
+
+```yaml
+- name: anchor parity
+  id: guard
+  uses: ./                       # or alexisromtz-lab/ts-py-anchor-guard@<sha> once pinned
+  with:
+    check: anchor
+    source: fixtures/engine.ts
+    reference: fixtures/anchors.json
+- name: read the verdict
+  run: echo "rc=${{ steps.guard.outputs.rc }}"
+```
+
+`check` picks the module and is the only required input:
+
+| input | default | applies to | meaning |
+|---|---|---|---|
+| `check` | — | all | `anchor` · `embed` · `probe` |
+| `self-test` | `false` | all | run the module's own `--self-test` instead of measuring a subject |
+| `source` | — | `anchor` | the TypeScript file to read |
+| `reference` | — | `anchor` | the JSON file with the anchors to compare |
+| `backend` | `auto` | `anchor` | `auto` · `node` · `static` |
+| `tolerance` | `0.0` | all | relative tolerance; the receipt still reports the residual |
+| `canvas` | — | `embed` | `W H` of the host canvas |
+| `window` | — | `embed` | `W H` of the sub-viewport |
+| `rect` | — | `embed` | `X Y W H` to check against; omitted means "compute it" |
+| `profile-a` / `profile-b` | — | `probe` | two whitespace-separated profile files |
+| `bands` | — | `probe` | band count, at least 3 and at least 32 samples each |
+| `max-shift` | — | `probe` | cap on the shift searched, in samples |
+
+Two outputs: `rc` (`0` · `1` · `2`, the same value the step exits with) and `receipt` (the whole
+JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
+
+**What is measured, and what is not.** The four runs below were executed by hand on 2026-11-25 with
+the `run:` block extracted from `action.yml` and `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` pointed at
+files — on node `v24.15.0`, Python 3.12.13:
+
+| input | exit | evidence |
+|---|---|---|
+| `check=anchor`, fixtures | `0` | 21 anchors, worst relative error `0.000e+00`, `backend: node v24.15.0` |
+| `check=embed`, `1920 1080` / `960 864` / `480 108 960 864` | `0` | `escala: [1.0, 1.0]`, the 1:1 invariant holds |
+| `check=probe`, 192 samples, 4 bands, shift `0.4` injected | `0` | `desplazamiento_global: 0.4002`, every band within `0.0011` of it |
+| `check=anchor` with `PLATE_W` moved by 1.0 | `1` | `causa: DIVERGE`; the step goes red |
+| `check=anchor` with no `source` | `20` | `::error` annotation, no traceback |
+| `check` misspelled | `20` | names the three accepted values |
+| `check=probe` with 2 bands | `2` | `NO_MEDIDO · PERFIL_INVALIDO · hacen falta al menos 3 bandas` |
+
+What is *not* measured here: the action has not yet run inside GitHub's own runner. The `action`
+job in `ci.yml` does that with `uses: ./` on every push, and until a green run exists, the table
+above is a local measurement of the same script, not of the action.
+
+There is no `v0` tag yet. Pin the commit sha until one is cut.
 
 ## `anchor_oracle`: exact arithmetic parity
 

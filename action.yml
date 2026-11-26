@@ -1,0 +1,171 @@
+name: ts-py-anchor-guard
+description: >-
+  Catch a TypeScript-to-Python port that drifted: exact numeric parity, a 1:1 viewport that
+  was rescaled, and sub-pixel phase from one pair of profiles. Exit codes are the contract
+  (0 conforming, 1 diverging with the cause named, 2 not measured, 20 bad invocation).
+author: alexisromtz-lab
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  check:
+    description: Which check to run — `anchor`, `embed` or `probe`.
+    required: true
+  self-test:
+    description: >-
+      Run the module's own self-test instead of a measurement. Use it to prove the wiring of
+      this action in one step, with no fixture to prepare.
+    required: false
+    default: "false"
+  source:
+    description: '`anchor`: TypeScript file whose declarations are evaluated.'
+    required: false
+    default: ""
+  reference:
+    description: '`anchor`: JSON `{name: value}` or `{name: {puntos, valores}}`.'
+    required: false
+    default: ""
+  backend:
+    description: '`anchor`: who produces the reference values — `auto`, `node` or `estatico`.'
+    required: false
+    default: "auto"
+  tolerance:
+    description: '`anchor`: relative tolerance. The default 0.0 is exact and stays exact.'
+    required: false
+    default: "0.0"
+  profile-a:
+    description: '`probe`: file with the reference profile (floats separated by spaces).'
+    required: false
+    default: ""
+  profile-b:
+    description: '`probe`: file with the measured profile.'
+    required: false
+    default: ""
+  bands:
+    description: '`probe`: number of bands for the scale fit.'
+    required: false
+    default: ""
+  max-shift:
+    description: '`probe`: largest shift searched, in samples.'
+    required: false
+    default: ""
+  canvas:
+    description: '`embed`: canvas height and width, in that order, space separated.'
+    required: false
+    default: ""
+  window:
+    description: '`embed`: sub-viewport height and width, in that order, space separated.'
+    required: false
+    default: ""
+  rect:
+    description: '`embed`: the rectangle the engine actually uses, `X Y A H`. Omit to centre.'
+    required: false
+    default: ""
+
+outputs:
+  rc:
+    description: The module's exit code, propagated unchanged.
+    value: ${{ steps.medir.outputs.rc }}
+  receipt:
+    description: The JSON receipt the module printed, one line.
+    value: ${{ steps.medir.outputs.receipt }}
+
+runs:
+  using: composite
+  steps:
+    - id: medir
+      shell: bash
+      env:
+        ENTRADA_CHECK: ${{ inputs.check }}
+        ENTRADA_SELF_TEST: ${{ inputs.self-test }}
+        ENTRADA_SOURCE: ${{ inputs.source }}
+        ENTRADA_REFERENCE: ${{ inputs.reference }}
+        ENTRADA_BACKEND: ${{ inputs.backend }}
+        ENTRADA_TOLERANCE: ${{ inputs.tolerance }}
+        ENTRADA_PROFILE_A: ${{ inputs.profile-a }}
+        ENTRADA_PROFILE_B: ${{ inputs.profile-b }}
+        ENTRADA_BANDS: ${{ inputs.bands }}
+        ENTRADA_MAX_SHIFT: ${{ inputs.max-shift }}
+        ENTRADA_CANVAS: ${{ inputs.canvas }}
+        ENTRADA_WINDOW: ${{ inputs.window }}
+        ENTRADA_RECT: ${{ inputs.rect }}
+        GUARDA: ${{ github.action_path }}
+      run: |
+        set -uo pipefail
+
+        case "$ENTRADA_CHECK" in
+          anchor) modulo=anchor_oracle ;;
+          embed)  modulo=viewport_embed ;;
+          probe)  modulo=subpixel_probe ;;
+          *)
+            echo "::error title=ts-py-anchor-guard::check desconocido" \
+              "'$ENTRADA_CHECK' (anchor|embed|probe)"
+            exit 20
+            ;;
+        esac
+
+        # Every value crosses as a separate argv entry: no word splitting, no eval. A path with
+        # a space is a path with a space, not two arguments.
+        args=(--json)
+        if [ "$ENTRADA_SELF_TEST" = "true" ]; then
+          args=(--self-test)
+        else
+          case "$ENTRADA_CHECK" in
+            anchor)
+              if [ -z "$ENTRADA_SOURCE" ] || [ -z "$ENTRADA_REFERENCE" ]; then
+                echo "::error title=ts-py-anchor-guard::check=anchor needs source and reference"
+                exit 20
+              fi
+              args+=(--fuente "$ENTRADA_SOURCE" --referencia "$ENTRADA_REFERENCE")
+              args+=(--backend "${ENTRADA_BACKEND:-auto}" --tolerancia "${ENTRADA_TOLERANCE:-0.0}")
+              ;;
+            probe)
+              if [ -z "$ENTRADA_PROFILE_A" ] || [ -z "$ENTRADA_PROFILE_B" ]; then
+                echo "::error title=ts-py-anchor-guard::check=probe needs profile-a and profile-b"
+                exit 20
+              fi
+              args+=(--a "$ENTRADA_PROFILE_A" --b "$ENTRADA_PROFILE_B")
+              if [ -n "$ENTRADA_BANDS" ]; then args+=(--bandas "$ENTRADA_BANDS"); fi
+              if [ -n "$ENTRADA_MAX_SHIFT" ]; then args+=(--max-shift "$ENTRADA_MAX_SHIFT"); fi
+              ;;
+            embed)
+              if [ -z "$ENTRADA_CANVAS" ] || [ -z "$ENTRADA_WINDOW" ]; then
+                echo "::error title=ts-py-anchor-guard::check=embed needs canvas and window"
+                exit 20
+              fi
+              read -r -a lona <<< "$ENTRADA_CANVAS"
+              read -r -a ventana <<< "$ENTRADA_WINDOW"
+              args+=(--canvas "${lona[@]}" --ventana "${ventana[@]}")
+              if [ -n "$ENTRADA_RECT" ]; then
+                read -r -a caja <<< "$ENTRADA_RECT"
+                args+=(--rect "${caja[@]}")
+              fi
+              ;;
+          esac
+        fi
+
+        # The package is used in place: the action is the clone, so nothing is installed and the
+        # version under test is the one the caller pinned.
+        salida=$(PYTHONPATH="$GUARDA" python3 -m "ts_py_anchor_guard.$modulo" "${args[@]}")
+        rc=$?
+
+        printf '%s\n' "$salida"
+        # A self-test prints prose, not a receipt: labelling it json would lie in the UI.
+        fence='```'
+        if [ "$ENTRADA_SELF_TEST" = 'true' ]; then fence='```text'; else fence='```json'; fi
+        {
+          echo "### ts-py-anchor-guard · $ENTRADA_CHECK"
+          echo ''
+          echo "$fence"
+          printf '%s\n' "$salida"
+          echo '```'
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        # One line, so a caller can read it without parsing the whole receipt.
+        recibo=$(printf '%s' "$salida" | tr -d '\n')
+        destino="${GITHUB_OUTPUT:-/dev/null}"
+        printf 'rc=%s\n' "$rc" >> "$destino"
+        printf 'receipt=%s\n' "$recibo" >> "$destino"
+
+        exit "$rc"
