@@ -8,7 +8,7 @@ the claim can be re-run rather than believed.
 ## What it measured
 
 Run [`45852973521`](https://github.com/alexisromtz-lab/v0-consumer/actions/runs/45852973521) in a
-throwaway repository (`alexisromtz-lab/v0-consumer`, since deleted), on `ubuntu-latest`,
+throwaway repository (`alexisromtz-lab/v0-consumer`), on `ubuntu-latest`,
 `2026-11-26`, runner `node v24.22.3` at `/usr/local/bin/node` and `Python 3.14.4`:
 
 | step | inputs | exit | evidence |
@@ -40,6 +40,6 @@ receipt it wrote stayed readable.
 
 ## A note on the citation
 
-The run above belongs to a repository that no longer exists, so its URL is a historical record,
-not a live page. The reproducible artifact is this directory: identical bytes to what ran,
-verified with `shasum -a 256` at the time of the copy.
+The run above belongs to a throwaway repository, not a product: treat its URL as a record of what
+happened rather than a page anyone maintains. The reproducible artifact is this directory —
+identical bytes to what ran, verified with `shasum -a 256` at the time of the copy.

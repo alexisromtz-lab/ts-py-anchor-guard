@@ -315,9 +315,9 @@ tag from a throwaway repository that this project does not own (`ubuntu-latest`,
 `"peor_rel": 0.0`; the same pair with the reference displaced to `0.25` returned `1` with
 `causa: DIVERGE` and left its `receipt-file` readable after the step went red; and the same
 positive inputs with no `backend` declared returned `0` from `auto`, which selected
-`node v24.22.3`. That repository was deleted after the run, so the link is a record of what
-happened rather than a page: the reproducible artifact is `consumers/v0/`, byte-identical to what
-ran, and its `README.md` says how to push it to a repository of your own in four commands.
+`node v24.22.3`. That repository is a throwaway host for the run, not a product: read the link as
+a record of what happened, and `consumers/v0/` — byte-identical to what ran — as the reproducible
+artifact, with its `README.md` saying how to push it to a repository of your own in four commands.
 
 ## `anchor_oracle`: exact arithmetic parity
 
