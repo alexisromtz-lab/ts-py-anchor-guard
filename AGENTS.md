@@ -47,6 +47,11 @@ appear here. The fixtures are synthetic on purpose.
   it classifies the wrong thing without failing: on macOS, system Python caches bytecode under
   `~/Library/Caches/com.apple.python/<path>-39.pyc`, so three modules "opened data" with zero
   data opened. Truncate for printing, never for judging.
+- **A rule the report cannot display needs a test on the event.** Two exclusions in the probe —
+  the interpreter's own tree, and bytecode written through a descriptor — never fire in a
+  clean run, because the child runs with `-B`. Nothing was watching them, and two mutants that
+  removed them survived: a guard the suite cannot exercise is a guard the suite does not have.
+  Feed the predicate the events a real run would produce, with a data write as the control.
 
 ## Style
 

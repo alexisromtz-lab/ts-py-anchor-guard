@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.4.1`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -92,6 +92,12 @@ flag's name. It found one: `--referencia` in `live_oracle` reads the *names* to 
 never compares the values, while the flag name promised a comparison. The help text now says
 so, and the code is unchanged; the judging variant is `anchor_oracle --backend node`. Again the
 minor version moves because a file was added, not because an exit code changed.
+
+`0.4.1` adds four mutants over the self-test probe's predicates, two of which survived the
+first run — the exclusion for the interpreter's own tree and the filter for bytecode written
+through a descriptor, neither of which any run can display, because the child runs with `-B`.
+One test now feeds those events straight to the predicate. The patch moves because the harness
+grew and the shipped files did not.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -289,7 +295,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `29` of `33` mutants killed; the other `4` cannot be reached by any input | 33 curated single-line mutations across seven sites (four modules, the CLI, two harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 33 mutations and names the four exemptions with their reason |
+| `33` of `37` mutants killed; the other `4` cannot be reached by any input | 37 curated single-line mutations across seven sites (four modules, the CLI, two harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 37 mutations and names the four exemptions with their reason |
 | `13` of `16` exit-code cells measured; `3` empty, each with its motive | every CLI run once per cell, its exit code compared with the process's, no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -302,10 +308,10 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 33 mutations, 29 killed
+### What the tests would notice: 37 mutations, 33 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 33 one-line
+open the fixture" but "if the code were wrong, would anything go red" — so 37 one-line
 mutations are applied across seven sites (the four modules, the CLI, and the two harness
 probes), each in a fresh copy, each followed by the whole suite.
 
@@ -320,7 +326,16 @@ probes), each in a fresh copy, each followed by the whole suite.
   reported as the absolute one.
 - **22 of 25 died** once those five tests existed. The set then grew to 33 when the exit-code
   census and the self-test probe were brought under the same instrument.
-- **29 of 33 die now.** The four survivors are the declared ones in the table below, and the
+- **Four mutants were then added over the probe's own predicates, and two survived.** The
+  probe's last fix came from a false red and nothing was watching the function that fixed it.
+  Reverting `repr(args)` to the 160-character excerpt, and making the `.pyc` branch blind to
+  case, both died at once — killed by the test that pins the long path. Removing the
+  interpreter-tree exclusion and removing the descriptor filter survived, because neither is
+  reachable from the report: the child runs with `-B`, so no `.pyc` is written through a
+  descriptor, and nothing under `sys.prefix` is opened. A rule no run can display is a rule no
+  test holds, so `test_lo_que_abre_el_interprete_no_es_io_de_datos` now feeds the four events
+  straight to the predicate, with a `.ts` write as the positive control.
+- **33 of 37 die now.** The four survivors are the declared ones in the table below, and the
   script reports `huecos de cobertura: ninguno` — zero undeclared holes — with exit code `0`.
 
 The `17` is re-measured, not remembered: the same script, run against the tests at that

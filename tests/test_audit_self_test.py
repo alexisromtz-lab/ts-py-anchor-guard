@@ -91,6 +91,19 @@ class ContratoDelProbe(unittest.TestCase):
         self.assertFalse(probe._es_dato("open", (larga, "rb", 16777216)))
         self.assertTrue(probe._es_dato("open", (larga.replace(".pyc", ".json"), "r", 0)))
 
+    def test_lo_que_abre_el_interprete_no_es_io_de_datos(self):
+        """Two exclusions that nothing else pins, both measured on the event.
+
+        Neither is reachable from the report: the child runs with `-B`, so no `.pyc` is
+        written through a descriptor and nothing in the interpreter's own tree is opened.
+        A rule that only the report could show would be a rule no test holds.
+        """
+        dentro = str(Path(sys.prefix) / "lib" / "python3.12" / "site-packages" / "x.so")
+        self.assertFalse(probe._es_dato("open", (dentro, "rb", 0)))
+        self.assertFalse(probe._es_dato("open", (3, "wb")))
+        self.assertTrue(probe._es_dato("open", (3, "rb")))
+        self.assertTrue(probe._es_dato("open", ("/var/folders/x/T/fuente.ts", "w", 0)))
+
     def test_la_sonda_no_deja_bytecode_en_el_arbol(self):
         """Asking the probe a question must not answer by leaving files behind.
 
