@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.8.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.8.1`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -556,8 +556,28 @@ The receipt always names the backend that produced the reference values, because
 measured by an interpreter and a number measured by a model of that interpreter are not the
 same evidence. `--backend estatico` forces the model; `--backend node` fails with
 `NO_MEDIDO · SIN_ORACULO_VIVO` when no suitable node is present; `auto`, the default, uses
-node when it can. There is no silent fallback — a mode that was asked for and could not run
-is a gap, not a demotion to the other one.
+node when it can.
+
+**A node that is there and cannot load the source is the same gap in the reader.** Node's
+strip-only mode refuses `enum` and `namespace`, which are ordinary TypeScript — six `export
+enum` in the first production file this was measured on (`posthog/posthog@bda26b33`,
+`frontend/src/lib/constants.tsx`). Until `0.8.1` that made `auto`, the path nobody has to
+declare, answer `rc 2 ORACULO_VIVO_FALLO` on a file the static reader measures exactly: the
+instrument refused the subject because of its own reader. `auto` now falls back to its
+arithmetic and **publishes the reason** in the receipt's `aviso`, because a fallback that is
+not named is a weaker instrument wearing a stronger one's name:
+
+```
+"backend": "estatico",
+"aviso": "node no leyo la fuente (node rc 1: SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]:
+          TypeScript enum is not supported in strip-only mode); medido con el lector estatico",
+"rc": 0
+```
+
+An explicit `backend: node` — on the command line or in the pair — still fails with
+`ORACULO_VIVO_FALLO`: that caller asked for the second implementation and does not get to
+receive the first without knowing. What was asked for and could not run is a gap, never a
+demotion to the other mode.
 
 The two modes do not cover the same population, and both say so. On a 627-line production
 camera module:
@@ -646,7 +666,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `55` of `60` mutants killed under CPython 3.12.13, `54` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 60 curated single-line mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 60 mutations and names the exemptions with their reason, conditional ones included |
+| `58` of `63` mutants killed under CPython 3.12.13, `57` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 63 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 63 mutations and names the exemptions with their reason, conditional ones included |
 | `16` of `20` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `16` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:

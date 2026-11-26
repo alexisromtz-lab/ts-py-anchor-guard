@@ -221,6 +221,19 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
     ("ce_tabla_choque_invertido", "tools/contrato_censo.py",
      'if f.get("choque") else', 'if not f.get("choque") else',
      "la tabla nombra la causa contraria: un choque se publica como codigo equivocado"),
+    ("ao_auto_cae_cuando_se_pide", "ts_py_anchor_guard/anchor_oracle.py",
+     '        if backend == "node":\n'
+     '            return None, "estatico", ("ORACULO_VIVO_FALLO", motivo), None',
+     '        if False:\n'
+     '            return None, "estatico", ("ORACULO_VIVO_FALLO", motivo), None',
+     "un `node` pedido por el llamante baja al lector estatico: el hueco vuelve a leerse "
+     "como verde"),
+    ("ao_auto_sin_nombre", "ts_py_anchor_guard/anchor_oracle.py",
+     '        return None, "estatico", None, (f"node no leyo la fuente ({motivo}); "\n'
+     '                                        f"medido con el lector estatico")',
+     '        return None, "estatico", None, None',
+     "la caida de `auto` deja de publicar por que: un lector mas debil con el nombre del "
+     "mas fuerte"),
     # --- el manifiesto: datos que encienden compuertas ---
     ("mf_version_ignorada", "ts_py_anchor_guard/manifiesto.py",
      "    if version != VERSION:",
@@ -255,6 +268,9 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      '    return par.get("cobertura") or {"declaradas": 0, "comparadas": 0, "omitidas": []}',
      '    return par["cobertura"]',
      "un par que se niega antes de la cobertura vuelve a tumbar el recibo entero"),
+    ("mf_aviso_no_publicado", "ts_py_anchor_guard/manifiesto.py",
+     "    if aviso:\n", "    if False:\n",
+     "la caida de `auto` no llega al recibo: el lector que corrio se lee como el que se pidio"),
     ("mf_tolerancia_del_par_ignorada", "ts_py_anchor_guard/manifiesto.py",
      'par.get("tolerancia", 0.0 if tolerancia is None else tolerancia)',
      '(0.0 if tolerancia is None else tolerancia)',

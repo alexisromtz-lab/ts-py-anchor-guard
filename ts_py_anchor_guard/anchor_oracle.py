@@ -787,27 +787,38 @@ def _autotest() -> int:
 
 
 def medir_vivos(texto: str, referencia: dict, backend: str = "auto"):
-    """`(vivos, nombre del backend, fallo)`; an empty `fallo` means it ran or was not asked.
+    """`(vivos, nombre del backend, fallo, aviso)`; an empty `fallo` means it ran or was
+    not asked, and a non-empty `aviso` names the reader that was chosen and did not run.
 
     `auto` that finds no node falls back to this module's arithmetic without a word, which
     is what `auto` means; `node` that finds none is a gap, because a mode that was asked
     for and could not run is not the other mode.
+
+    A node that is there and cannot load the source -- `enum` and `namespace` are what
+    TypeScript's strip-only mode refuses, and both are ordinary -- is the same gap in the
+    reader as no node at all, so `auto` keeps going with the arithmetic it can run. The
+    reason travels back as `aviso`, because a fallback that is not named is a weaker
+    instrument wearing a stronger one's name. An explicit `node` still fails: that caller
+    asked for the second implementation and does not get to receive the first.
     """
     if backend == "estatico":
-        return None, "estatico", None
+        return None, "estatico", None, None
     from . import live_oracle
 
     nodo = live_oracle.version_de_nodo()
     if nodo is None:
         if backend == "node":
-            return None, "estatico", ("SIN_ORACULO_VIVO", "node >= 22.6 no esta disponible")
-        return None, "estatico", None
+            return None, "estatico", ("SIN_ORACULO_VIVO", "node >= 22.6 no esta disponible"), None
+        return None, "estatico", None, None
     vivos, motivo = live_oracle.medir(texto, referencia, nodo=nodo)
     if motivo:
-        return None, "estatico", ("ORACULO_VIVO_FALLO", motivo)
+        if backend == "node":
+            return None, "estatico", ("ORACULO_VIVO_FALLO", motivo), None
+        return None, "estatico", None, (f"node no leyo la fuente ({motivo}); "
+                                        f"medido con el lector estatico")
     version = subprocess.run([nodo[0], "--version"], capture_output=True,
                              text=True).stdout.strip()
-    return vivos, "node " + version, None
+    return vivos, "node " + version, None, None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -871,13 +882,15 @@ def main(argv: list[str] | None = None) -> int:
         return no_medido("INSUMO_FALTA", str(exc))
     except json.JSONDecodeError as exc:
         return no_medido("INSUMO_ILEGIBLE", f"referencia {args.referencia!r}: {exc}")
-    vivos, backend, fallo = medir_vivos(texto, referencia, args.backend)
+    vivos, backend, fallo, aviso = medir_vivos(texto, referencia, args.backend)
     if fallo:
         print(f"NO_MEDIDO · {fallo[0]} · {fallo[1]}", file=sys.stderr)
         return RC_NO_MEDIDO
     recibo = comparar(texto, referencia, tolerancia=args.tolerancia, vivos=vivos,
                       backend=backend,
                       exigir_cobertura_total=args.exigir_cobertura_total)
+    if aviso:
+        recibo["aviso"] = aviso
     if args.json:
         print(json.dumps(recibo, indent=2, sort_keys=True))
     elif recibo["rc"] == RC_OK:

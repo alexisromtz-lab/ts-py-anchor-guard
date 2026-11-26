@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ts_py_anchor_guard import RC_ARITY, RC_DIVERGE, RC_NO_MEDIDO, RC_OK
+from ts_py_anchor_guard import RC_ARITY, RC_DIVERGE, RC_NO_MEDIDO, RC_OK, live_oracle
 from ts_py_anchor_guard.anchor_oracle import main
 from ts_py_anchor_guard.manifiesto import ManifiestoIlegible, cargar, correr
 
@@ -306,6 +306,53 @@ class ManifiestoTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(["--manifest", str(ruta), "--fuente", "objeto.ts"]),
                              RC_ARITY)
+
+
+_ENUM_TS = "export enum Destino { A = 1 }\nexport const K = 0.15;\n"
+
+
+@unittest.skipUnless(live_oracle.version_de_nodo(), "node >= 22.6 no disponible")
+class CaidaNombradaEnElManifiestoTest(unittest.TestCase):
+    """`enum` es TypeScript corriente: el par se mide y el recibo dice quién midió.
+
+    Es el primer límite que encontró código de producción y no un fixture: medido sobre
+    `posthog/posthog@bda26b33 frontend/src/lib/constants.tsx`, seis `export enum` dejaban
+    el par entero en rc 2 por el lector, con el ancla perfectamente legible.
+    """
+
+    def setUp(self) -> None:
+        self._caja = tempfile.TemporaryDirectory()
+        self.raiz = Path(self._caja.name)
+        (self.raiz / "enum.ts").write_text(_ENUM_TS)
+        (self.raiz / "enum.json").write_text(json.dumps({"K": 0.15}))
+
+    def tearDown(self) -> None:
+        self._caja.cleanup()
+
+    def _correr(self, **extra) -> tuple[int, dict]:
+        par = {"nombre": "enum", "fuente": "enum.ts", "referencia": "enum.json"}
+        par.update(extra)
+        ruta = self.raiz / "manifiesto.json"
+        ruta.write_text(json.dumps({"version": 1, "pares": [par]}, indent=2))
+        salida = io.StringIO()
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(io.StringIO()):
+            rc = correr(ruta, json_out=True)
+        return rc, json.loads(salida.getvalue())
+
+    def test_auto_mide_la_ancla_y_nombra_al_lector_que_no_pudo(self):
+        rc, recibo = self._correr()
+        par = recibo["pares"][0]
+        self.assertEqual(rc, RC_OK)
+        self.assertEqual(par["backend"], "estatico")
+        self.assertIn("enum", par["aviso"])
+        self.assertEqual([f["peor_rel"] for f in par["anclas"]], [0.0])
+
+    def test_un_node_declarado_por_el_par_no_cae_a_la_aritmetica_propia(self):
+        rc, recibo = self._correr(backend="node")
+        par = recibo["pares"][0]
+        self.assertEqual(rc, RC_NO_MEDIDO)
+        self.assertEqual(par["causa"], "ORACULO_VIVO_FALLO")
+        self.assertNotIn("aviso", par)
 
 
 if __name__ == "__main__":  # pragma: no cover - entry for `python tests/...`

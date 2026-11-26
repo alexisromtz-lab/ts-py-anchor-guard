@@ -252,7 +252,8 @@ def _correr_par(par: dict, raiz: Path, backend: str, tolerancia: float | None,
         return _recibo_vacio(nombre, "INSUMO_ILEGIBLE", f"referencia {str(referencia)!r}: {exc}")
     anclas = extraer_anclas(texto)
     valorada, fallos, ignoradas = expandir(crudo, par.get("mapeos") or {}, anclas)
-    vivos, nombre_backend, fallo = medir_vivos(texto, valorada, par.get("backend") or backend)
+    vivos, nombre_backend, fallo, aviso = medir_vivos(texto, valorada,
+                                                      par.get("backend") or backend)
     if fallo:
         recibo = _recibo_vacio(nombre, fallo[0], fallo[1])
         recibo["referencia_ignorada"] = ignoradas
@@ -264,6 +265,10 @@ def _correr_par(par: dict, raiz: Path, backend: str, tolerancia: float | None,
                                               or exigir_cobertura_total))
     recibo["nombre"] = nombre
     recibo["referencia_ignorada"] = ignoradas
+    if aviso:
+        # `auto` chose a reader that could not load the source and measured with the other
+        # one: the receipt names the reason, or the weaker reading passes for the stronger.
+        recibo["aviso"] = aviso
     if ignoradas and recibo.get("causa") == "REFERENCIA_VACIA":
         # Everything the reference held was addressed by nobody: name the keys, or the
         # reader has an empty-file verdict on a file that is not empty.
@@ -291,9 +296,10 @@ def _imprimir(recibo: dict) -> None:
         cobertura = _cubierta(par)
         ignoradas = par.get("referencia_ignorada") or []
         if par["rc"] == RC_OK:
+            aviso = f" · aviso: {par['aviso']}" if par.get("aviso") else ""
             print(f"CONFORME {par['nombre']} · {cobertura['comparadas']} comparada(s) · "
                   f"{len(cobertura['omitidas'])} omitida(s) · {len(ignoradas)} ignorada(s) · "
-                  f"{par['backend']}")
+                  f"{par['backend']}{aviso}")
         elif par["rc"] == RC_DIVERGE:
             for fila in par["anclas"]:
                 if not fila["ok"]:

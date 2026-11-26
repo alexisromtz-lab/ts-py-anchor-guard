@@ -2,15 +2,23 @@ import json
 import pathlib
 import re
 import unittest
+from unittest import mock
 
+from ts_py_anchor_guard import live_oracle
 from ts_py_anchor_guard.anchor_oracle import (
     RC_ARITY, RC_DIVERGE, RC_NO_MEDIDO, RC_OK, AnclaDesconocida, FuenteIlegible,
-    comparar, evaluar, extraer_anclas, main, residuo_de_redondeo,
+    comparar, evaluar, extraer_anclas, main, medir_vivos, residuo_de_redondeo,
 )
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FUENTE = (RAIZ / "fixtures" / "engine.ts").read_text()
 REFERENCIA = json.loads((RAIZ / "fixtures" / "anchors.json").read_text())
+
+# La fuente mas corta que el lector vivo tiene que poder cargar.
+_FUENTE_CORTA = """
+export const A = 864;
+export const CAJA = { ancho: 1080 } as const;
+"""
 
 
 class AnclasTest(unittest.TestCase):
@@ -273,6 +281,37 @@ class ContratoTest(unittest.TestCase):
             except SystemExit as salida:  # `ParserDeContrato` exits 20 on a bad invocation
                 rc = salida.code
             self.assertNotEqual(rc, RC_ARITY, f"el CLI rechaza el backend publicado: {backend}")
+
+
+class CaidaNombradaTest(unittest.TestCase):
+    """`auto` con un node que existe y no puede cargar la fuente no es un cero del sujeto.
+
+    `enum` es TypeScript corriente y el modo *strip-only* de Node lo rechaza, así que el
+    camino por defecto —nadie declara `backend`— contestaba rc 2 sobre un archivo que el
+    lector estático mide exacto: el instrumento rechazaba al sujeto por su propio lector.
+    """
+
+    def test_auto_cae_al_estatico_y_publica_por_que_node_no_corrio(self):
+        with mock.patch.object(live_oracle, "version_de_nodo",
+                               return_value=("/usr/bin/node", [])), \
+             mock.patch.object(live_oracle, "medir",
+                               return_value=({}, "node rc 1: SyntaxError [ERR_UNSUPPORTED_"
+                                                 "TYPESCRIPT_SYNTAX]: TypeScript enum is not "
+                                                 "supported in strip-only mode")):
+            vivos, backend, fallo, aviso = medir_vivos(_FUENTE_CORTA, {"A": 864}, "auto")
+        self.assertEqual((vivos, backend, fallo), (None, "estatico", None))
+        self.assertIn("enum", aviso)
+        self.assertIn("estatico", aviso)
+
+    def test_un_node_pedido_explicitamente_sigue_siendo_un_hueco(self):
+        """Quien pide la segunda implementación no recibe la primera sin saberlo."""
+        with mock.patch.object(live_oracle, "version_de_nodo",
+                               return_value=("/usr/bin/node", [])), \
+             mock.patch.object(live_oracle, "medir", return_value=({}, "node rc 1: SyntaxError")):
+            vivos, _backend, fallo, aviso = medir_vivos(_FUENTE_CORTA, {"A": 864}, "node")
+        self.assertEqual(vivos, None)
+        self.assertEqual(fallo[0], "ORACULO_VIVO_FALLO")
+        self.assertIsNone(aviso)
 
 
 if __name__ == "__main__":
