@@ -179,12 +179,20 @@ and exits with the module's own code, so a divergence fails the step instead of 
 | `canvas` | — | `embed` | `W H` of the host canvas |
 | `window` | — | `embed` | `W H` of the sub-viewport |
 | `rect` | — | `embed` | `X Y W H` to check against; omitted means "compute it" |
+| `receipt-file` | — | all | also write `rc` and `receipt` to this file — the only way to read a **failure** |
 | `profile-a` / `profile-b` | — | `probe` | two whitespace-separated profile files |
 | `bands` | — | `probe` | band count, at least 3 and at least 32 samples each |
 | `max-shift` | — | `probe` | cap on the shift searched, in samples |
 
 Two outputs: `rc` (`0` · `1` · `2`, the same value the step exits with) and `receipt` (the whole
 JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
+
+**A failed step publishes no outputs.** Measured on run `45842378293`: the step below went red and
+`steps.desvio.outputs.rc` arrived at the next step as the empty string, while `outcome` arrived as
+`failure`. So a caller that wants the verdict *and* the receipt of a divergence must pass
+`receipt-file`; the action writes the same two lines there before it exits. A negative control
+that reads `outputs.rc` from a failing step is a control that always sees nothing, which is a
+green that measures the harness rather than the subject.
 
 **What is measured, and what is not.** The four runs below were executed by hand on 2026-11-25 with
 the `run:` block extracted from `action.yml` and `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` pointed at

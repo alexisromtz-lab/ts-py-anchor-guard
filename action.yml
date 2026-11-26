@@ -58,6 +58,10 @@ inputs:
     description: '`embed`: sub-viewport height and width, in that order, space separated.'
     required: false
     default: ""
+  receipt-file:
+    description: 'Write `rc` and `receipt` here too. Needed to read a failure: see below.'
+    required: false
+    default: ""
   rect:
     description: '`embed`: the rectangle the engine actually uses, `X Y A H`. Omit to centre.'
     required: false
@@ -90,6 +94,7 @@ runs:
         ENTRADA_CANVAS: ${{ inputs.canvas }}
         ENTRADA_WINDOW: ${{ inputs.window }}
         ENTRADA_RECT: ${{ inputs.rect }}
+        ENTRADA_RECEIPT_FILE: ${{ inputs.receipt-file }}
         GUARDA: ${{ github.action_path }}
       run: |
         set -uo pipefail
@@ -167,5 +172,14 @@ runs:
         destino="${GITHUB_OUTPUT:-/dev/null}"
         printf 'rc=%s\n' "$rc" >> "$destino"
         printf 'receipt=%s\n' "$recibo" >> "$destino"
+
+        # Measured: a step that exits non-zero publishes no outputs at all, so a caller that
+        # needs the receipt of a failure has to ask for a file before the step ends.
+        if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
+          {
+            printf 'rc=%s\n' "$rc"
+            printf 'receipt=%s\n' "$recibo"
+          } > "$ENTRADA_RECEIPT_FILE"
+        fi
 
         exit "$rc"

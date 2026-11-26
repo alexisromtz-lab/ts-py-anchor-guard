@@ -87,13 +87,15 @@ jobs:
           check: anchor
           source: fixtures/engine.ts
           reference: desplazado.json
+          receipt-file: desvio.txt
       - name: el fallo se ve como fallo, no como verde
         env:
-          RC: ${{ steps.desvio.outputs.rc }}
-          RECIBO: ${{ steps.desvio.outputs.receipt }}
           RESULTADO: ${{ steps.desvio.outcome }}
+          RC_DEL_STEP: ${{ steps.desvio.outputs.rc }}
         run: |
           # A job that only proves the happy path proves the step runs, not that it judges.
           test "$RESULTADO" = "failure"
-          test "$RC" = "1"
-          printf '%s' "$RECIBO" | grep -q DIVERGE
+          # A failed step publishes no outputs; the file is the only channel that survives.
+          test -z "$RC_DEL_STEP"
+          grep -q '^rc=1$' desvio.txt
+          grep -q DIVERGE desvio.txt
