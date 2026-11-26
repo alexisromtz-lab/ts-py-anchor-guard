@@ -187,12 +187,21 @@ and exits with the module's own code, so a divergence fails the step instead of 
 Two outputs: `rc` (`0` · `1` · `2`, the same value the step exits with) and `receipt` (the whole
 JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
 
-**A failed step publishes no outputs.** Measured on run `45842378293`: the step below went red and
-`steps.desvio.outputs.rc` arrived at the next step as the empty string, while `outcome` arrived as
-`failure`. So a caller that wants the verdict *and* the receipt of a divergence must pass
-`receipt-file`; the action writes the same two lines there before it exits. A negative control
-that reads `outputs.rc` from a failing step is a control that always sees nothing, which is a
-green that measures the harness rather than the subject.
+**A failed step publishes no outputs**, and there are two ways to lose one. Measured on run
+`45842378293`: the step went red and `steps.desvio.outputs.rc` arrived at the next step as the
+empty string, while `outcome` arrived as `failure`. A control that reads `outputs.rc` from a
+failing step is a control that always sees nothing — a green that measures the harness.
+
+The cause was deeper and worth writing down: `shell: bash` inside a composite action is
+`bash -e`, so the line that captured the module's exit code — the very value the action exists to
+propagate — aborted the script on any divergence, before it could write an output or a file. The
+fix is `set +e -u -o pipefail` at the top, so the script owns its own flow. It survived a local
+verification because the extracted script was being run as `bash file`, without `-e`: the same
+text under a different shell, and that difference was the whole defect. Run the script as
+`bash --noprofile --norc -e -o pipefail` or you are not measuring the action.
+
+Hence `receipt-file`: when it is set, the action writes `rc` and `receipt` there before exiting,
+which is the only channel that survives a non-zero status.
 
 **What is measured, and what is not.** The four runs below were executed by hand on 2026-11-25 with
 the `run:` block extracted from `action.yml` and `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` pointed at

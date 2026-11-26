@@ -97,7 +97,11 @@ runs:
         ENTRADA_RECEIPT_FILE: ${{ inputs.receipt-file }}
         GUARDA: ${{ github.action_path }}
       run: |
-        set -uo pipefail
+        # `shell: bash` in a composite action is `bash -e`, so every statement below would abort
+        # the script on any non-zero status — including the module's own exit code, which is the
+        # value this action exists to propagate. Measured on run 45842590972: the assignment that
+        # captures a divergence killed the script before it could write its outputs or its file.
+        set +e -u -o pipefail
 
         case "$ENTRADA_CHECK" in
           anchor) modulo=anchor_oracle ;;
