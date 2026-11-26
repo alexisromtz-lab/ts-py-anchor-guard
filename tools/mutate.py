@@ -253,6 +253,31 @@ INALCANZABLES = {
 }
 
 
+def _persiste_bytecode() -> bool:
+    """Whether this interpreter writes a `.pyc` for a cold import of a fresh module.
+
+    `au_sin_B` deletes the `-B` that keeps the probe's child from caching what it imports, so
+    what the mutant can move is whatever the interpreter caches. Measured on this machine:
+    3.12.13 writes two files for a one-line module, the CLT 3.9.6 writes none. Where none are
+    written, the flag has no observable effect and no test can kill its removal.
+    """
+    with tempfile.TemporaryDirectory(prefix="pyc-") as caja:
+        pkg = Path(caja) / "pkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        (pkg / "m.py").write_text("X = 1\n")
+        subprocess.run([sys.executable, "-c", "import pkg.m"], cwd=caja, check=False,
+                       capture_output=True)
+        return any(Path(caja).rglob("*.pyc"))
+
+
+if not _persiste_bytecode():
+    INALCANZABLES["au_sin_B"] = (
+        "equivalente: este interprete no escribe .pyc, asi que quitar el -B no cambia nada "
+        "observable (medido: 0 archivos para un import frio)")
+
+
+
 def _libre(ruta: Path) -> int | None:
     """Free bytes on the filesystem holding `ruta`, or `None` if it cannot be asked."""
     try:

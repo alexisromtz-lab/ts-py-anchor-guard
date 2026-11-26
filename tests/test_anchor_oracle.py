@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import unittest
 
 from ts_py_anchor_guard.anchor_oracle import (
@@ -191,6 +192,32 @@ class ContratoTest(unittest.TestCase):
                        "--referencia", str(RAIZ / "fixtures" / "anchors.json")])
         self.assertEqual(rc, RC_OK)
         self.assertIn("CONFORME", salida.getvalue())
+
+    def test_los_backends_que_el_readme_publica_son_los_que_el_cli_acepta(self):
+        """The input table is the only place a YAML caller learns the spelling.
+
+        `action.yml` forwards `backend` verbatim, and the table printed `static` for a reader
+        that accepts `estatico`: the first adopter would have got `20`, an answer about their
+        own call. A value published and refused is a defect on the front door, and prose cannot
+        catch it — this does.
+        """
+        import contextlib
+        import io
+        fila = next(linea for linea in (RAIZ / "README.md").read_text().splitlines()
+                    if linea.startswith("| `backend`"))
+        publicados = re.findall(r"`([^`]+)`", fila.split("|")[4].split("—")[0])
+        self.assertEqual(publicados, ["auto", "node", "estatico"])
+        for backend in publicados:
+            argv = ["--fuente", str(RAIZ / "fixtures" / "engine.ts"),
+                    "--referencia", str(RAIZ / "fixtures" / "anchors.json"),
+                    "--backend", backend]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    rc = main(argv)
+            except SystemExit as salida:  # `ParserDeContrato` exits 20 on a bad invocation
+                rc = salida.code
+            self.assertNotEqual(rc, RC_ARITY, f"el CLI rechaza el backend publicado: {backend}")
 
 
 if __name__ == "__main__":

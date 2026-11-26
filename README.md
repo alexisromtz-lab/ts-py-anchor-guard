@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.5.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.5.1`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -149,6 +149,27 @@ CLI already exposed, so no contract changed; what it removes is the gap between 
 and "a caller can adopt it in five lines". Four of its seven invocation paths are measured in the
 table above and one of them, the `uses: ./` job, only becomes evidence when CI runs it.
 
+`0.5.1` is that sentence paying its debt. The action advertised a dependency-free path, and no
+run of it had ever happened without the dependency present: `auto` prefers the live oracle, and
+every hosted runner ships `node`, so `backend: estatico` — the spelling the reader accepts, which
+the input table had been printing as `static` — was covered only by local unit tests. `ci.yml`
+now strips every directory that publishes a `node` from the `PATH` in a step that fails when it
+strips nothing, runs the action three times under it, and asserts the receipts: `0` with
+`"backend": "estatico"` and `"peor_rel": 0.0`, `1` with `DIVERGE` from a step that is red, and
+`2` for `backend: node`, which is the witness that the filter reached inside the composite. The
+census grew a `backend` axis in the same pass, and its two new rows change class with the
+environment rather than deducing one. Two documentation defects fell out: `static` for
+`estatico`, which the CLI answers with `20`, and the claim that a failed step publishes no
+outputs.
+
+The mutator moved for the same reason, on a smaller surface: `au_sin_B` was counted as a hole
+under the system 3.9.6 and killed under 3.12.13, and the difference is not the code but the
+interpreter — 3.9.6 writes no `.pyc` for a cold import, so removing `-B` changes nothing
+observable there. The exemption is now declared by that measurement instead of being asserted
+by a rate, which means the report says `44` and `45` on the interpreter that produces each.
+The patch moves because a return path was measured, two strings were corrected and a rate
+gained its subject; no exit code changed.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
@@ -174,12 +195,12 @@ and exits with the module's own code, so a divergence fails the step instead of 
 | `self-test` | `false` | all | run the module's own `--self-test` instead of measuring a subject |
 | `source` | — | `anchor` | the TypeScript file to read |
 | `reference` | — | `anchor` | the JSON file with the anchors to compare |
-| `backend` | `auto` | `anchor` | `auto` · `node` · `static` |
+| `backend` | `auto` | `anchor` | `auto` · `node` · `estatico` — the reader's own spelling, forwarded verbatim |
 | `tolerance` | `0.0` | all | relative tolerance; the receipt still reports the residual |
 | `canvas` | — | `embed` | `W H` of the host canvas |
 | `window` | — | `embed` | `W H` of the sub-viewport |
 | `rect` | — | `embed` | `X Y W H` to check against; omitted means "compute it" |
-| `receipt-file` | — | all | also write `rc` and `receipt` to this file — the only way to read a **failure** |
+| `receipt-file` | — | all | also write `rc` and `receipt` to this file — evidence a later reader can re-open, and a failure's receipt is written too |
 | `profile-a` / `profile-b` | — | `probe` | two whitespace-separated profile files |
 | `bands` | — | `probe` | band count, at least 3 and at least 32 samples each |
 | `max-shift` | — | `probe` | cap on the shift searched, in samples |
@@ -204,7 +225,30 @@ shell is not an instrument. Replay it as `bash --noprofile --norc -e -o pipefail
 `receipt-file` stays, because a caller may want the verdict and the receipt on disk without
 parsing outputs, and because a file is easier to attach to a review than a one-line field.
 
-**What is measured, and what is not.** The four runs below were executed by hand on 2026-11-25 with
+**`backend: estatico`, measured with no `node` on the `PATH`.** `auto` prefers the live oracle
+whenever it can reach one, so a runner that ships `node` — every GitHub-hosted runner does —
+never exercises the dependency-free path. The claim "no external toolchain required" was
+therefore resting on local unit tests, not on the published action. `ci.yml` now filters the
+`PATH` in a step of its own and runs the action three times under it:
+
+| step | input | exit | asserted from |
+|---|---|---|---|
+| `estatico_sin_node` | `backend: estatico`, fixtures | `0` | `"backend": "estatico"`, `"peor_rel": 0.0` in `receipt-file` |
+| `estatico_desvio` | `backend: estatico`, `PLATE_W` moved by 1.0 | `1` | `causa: DIVERGE` in `receipt-file`, written by a **failing** step |
+| `node_ausente` | `backend: node`, same fixtures | `2` | `NO_MEDIDO · SIN_ORACULO_VIVO`, read from the module |
+
+The third row is not a control for its own sake: it is the **witness** that the filter worked.
+If `node` were still reachable inside the composite, that step would return `0` and the two
+green rows above would prove nothing about a node-free environment. A green pair with a green
+witness is silence; a green pair with a red witness is a measurement.
+
+The step that filters `PATH` fails on purpose when it removes nothing, so a runner image that
+stops shipping `node` breaks the job loudly instead of turning the axis into a no-op.
+`tools/contrato_censo.py` runs there too: two of its rows change class with the environment
+(`--backend node` is `POR_DISENO · RC_OK` when `node` is present and `MEDIDO · RC_NO_MEDIDO`
+when it is not), so the grid measures the axis instead of deducing it.
+
+**What is measured, and what is not.** The seven runs below were executed by hand on 2026-11-25 with
 the `run:` block extracted from `action.yml` and `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` pointed at
 files — on node `v24.15.0`, Python 3.12.13:
 
@@ -218,11 +262,11 @@ files — on node `v24.15.0`, Python 3.12.13:
 | `check` misspelled | `20` | names the three accepted values |
 | `check=probe` with 2 bands | `2` | `NO_MEDIDO · PERFIL_INVALIDO · hacen falta al menos 3 bandas` |
 
-The `action` job in `ci.yml` then takes over: four steps with `uses: ./` — three self-tests and
-the fixtures — one step asserting `steps.oraculo.outputs.rc == 0`, and a negative control that
-generates a `reference` displaced by one unit, runs the action on it with
-`continue-on-error: true`, and asserts that the step **failed**, that `rc` is `1`, and that the
-`receipt` carries `DIVERGE`. A job that only proves the happy path proves the step runs, not
+The `action` job in `ci.yml` then takes over: seven steps with `uses: ./` — three self-tests, the
+fixtures, and the three node-free runs below — one step asserting `steps.oraculo.outputs.rc == 0`,
+and a negative control that generates a `reference` displaced by one unit, runs the action on it
+with `continue-on-error: true`, and asserts that the step **failed**, that `rc` is `1`, and that
+the `receipt` carries `DIVERGE`. A job that only proves the happy path proves the step runs, not
 that it judges.
 
 Run `45842968869` on `bef8f75`
@@ -231,7 +275,13 @@ with `action: success`, one step red on purpose inside it, and the three interpr
 That is what turns the seven rows above from a local measurement of a script into a measurement
 of the action.
 
-There is no `v0` tag yet. Pin the commit sha until one is cut.
+**Pin a tag or a sha, never `main`.** A tag is cut only on a commit whose `action` job came back
+green, which is why this file does not list its own tags — that sentence would go stale the
+instant one is cut. Ask `git ls-remote --tags` instead.
+
+```yaml
+uses: alexisromtz-lab/ts-py-anchor-guard@v0
+```
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -429,8 +479,8 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `45` of `50` mutants killed; the other `5` cannot be reached by any input | 50 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 50 mutations and names the five exemptions with their reason |
-| `15` of `18` contract rows measured; the other `3` declared with their motive | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, and no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
+| `45` of `50` mutants killed under CPython 3.12.13, `44` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 50 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 50 mutations and names the exemptions with their reason, conditional ones included |
+| `16` of `20` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `16` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 

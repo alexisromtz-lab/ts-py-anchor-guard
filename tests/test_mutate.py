@@ -1,6 +1,6 @@
 """Pin the README's mutation claim.
 
-The README says which mutations the suite notices and, just as importantly, which four no
+The README says which mutations the suite notices and, just as importantly, which ones no
 test can notice because no input reaches them. Both halves rot the same way: a mutation whose
 target text drifts becomes `NO_APPLICABLE` and is quietly counted as covered, and an
 "unreachable" branch that gains a reachable input turns into an undetected hole.
@@ -16,6 +16,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -42,6 +45,30 @@ class ObjetivosVivos(unittest.TestCase):
         for mid in mutate.INALCANZABLES:
             with self.subTest(mutante=mid):
                 self.assertTrue(mutate.INALCANZABLES[mid].strip())
+
+    def test_el_flag_B_solo_puede_importar_donde_el_interprete_escribe_pyc(self):
+        """The kill rate of `au_sin_B` is a property of the interpreter, and it moves.
+
+        Removing `-B` can only be noticed where an import leaves a `.pyc` behind: measured
+        here, 3.12.13 writes two files for a one-line module and the CLT 3.9.6 writes none.
+        So the mutant is killed on one interpreter and equivalent on the other, and a rate
+        published without saying which is a number with an unstated subject. The declaration
+        is tied to the measurement instead.
+        """
+        with tempfile.TemporaryDirectory(prefix="flag-b-") as caja:
+            copia = Path(caja) / "copia"
+            shutil.copytree(RAIZ, copia, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            sonda = copia / "tools" / "audit_self_test.py"
+            texto = sonda.read_text()
+            self.assertEqual(texto.count('[sys.executable, "-B", str('), 1)
+            sonda.write_text(texto.replace('[sys.executable, "-B", str(', '[sys.executable, str('))
+            subprocess.run([sys.executable, str(sonda), "--sonda", "anchor_oracle"],
+                           cwd=copia, capture_output=True, text=True, timeout=600)
+            escritos = list(copia.rglob("*.pyc"))
+        self.assertEqual(bool(escritos), mutate._persiste_bytecode(),
+                         f"el arnes declara {mutate._persiste_bytecode()} y la sonda dejo "
+                         f"{[str(x.relative_to(copia)) for x in escritos]}")
+        self.assertEqual("au_sin_B" in mutate.INALCANZABLES, not escritos)
 
     def test_un_mutante_desconocido_es_invocacion_mala(self):
         self.assertEqual(mutate.main(["no_existe"]), mutate.RC_ARITY)

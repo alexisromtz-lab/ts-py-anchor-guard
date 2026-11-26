@@ -80,17 +80,39 @@ class ContratoCenso(unittest.TestCase):
         self.assertNotIn("devolvio", texto)
 
     def test_las_celdas_vacias_se_declaran_con_su_motivo(self):
-        from ts_py_anchor_guard.live_oracle import version_de_nodo
-
         with tempfile.TemporaryDirectory(prefix="censo-") as caja:
             filas = censo.casos(RAIZ, Path(caja))
         vacias = [f for f in filas if f["clase"]]
-        self.assertEqual(len(vacias), 3 if version_de_nodo() else 4,
-                         "una celda vacia sin clase pasaria por medida")
+        self.assertEqual(len(vacias), 4, "una celda vacia sin clase pasaria por medida")
         for fila in vacias:
             self.assertTrue(fila["motivo"], f"{fila['modulo']} {fila['codigo']} sin motivo")
             self.assertNotEqual(fila["esperado"], fila["codigo"],
                                 "una celda vacia no puede esperar su propio codigo")
+
+    def test_el_eje_del_backend_se_mide_y_no_se_deduce(self):
+        """`auto` picks node whenever it can, so a grid of `auto` rows measures one backend of two.
+
+        Before this row existed the census ran `anchor_oracle` five times and never asked who
+        produced the numbers: `--backend estatico` — the path with no runtime beyond Python —
+        was unmeasured, and a silent demotion from `node` to `estatico` would have been invisible.
+        """
+        from ts_py_anchor_guard.live_oracle import version_de_nodo
+
+        with tempfile.TemporaryDirectory(prefix="censo-") as caja:
+            filas = censo.casos(RAIZ, Path(caja))
+        estatico = [f for f in filas if "--backend" in f["args"] and "estatico" in f["args"]]
+        self.assertEqual(len(estatico), 1, "el backend estatico no tiene fila propia")
+        self.assertEqual(estatico[0]["esperado"], censo.RC_OK)
+
+        pedido = [f for f in filas if f["args"][-1:] == ["node"]]
+        self.assertEqual(len(pedido), 1, "el modo pedido y ausente no tiene fila propia")
+        if version_de_nodo():
+            self.assertEqual(pedido[0]["clase"], censo.POR_DISENO,
+                             "con node el 2 no se alcanza por esta ruta y hay que declararlo")
+        else:
+            self.assertEqual(pedido[0]["clase"], censo.MEDIDO,
+                             "sin node la ruta devuelve 2: es una celda medida, no declarada")
+            self.assertEqual(pedido[0]["esperado"], censo.RC_NO_MEDIDO)
 
 
 if __name__ == "__main__":

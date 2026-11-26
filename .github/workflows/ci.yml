@@ -100,3 +100,112 @@ jobs:
           test "$RC_DEL_STEP" = "1"
           grep -q '^rc=1$' desvio.txt
           grep -q DIVERGE desvio.txt
+
+      # --- the dependency-free path, measured where node is not there to help ---
+      - name: un PATH sin node, y la prueba de que lo esta
+        id: sin_node
+        run: |
+          # `backend: auto` picks node whenever it can, so on a runner that ships node the static
+          # backend is never exercised: the promise "no runtime beyond Python" would rest on a
+          # path the CI cannot reach. Drop every PATH entry that publishes a `node`, then fail if
+          # none was found (nothing to remove means nothing is being measured) and if one survives
+          # the filter (a filter that matches nothing leaves a green with no subject).
+          con=$(python3 -c 'import os; print(":".join(p for p in os.environ["PATH"].split(":") if p and os.path.exists(os.path.join(p, "node"))))')
+          sin=$(python3 -c 'import os; print(":".join(p for p in os.environ["PATH"].split(":") if p and not os.path.exists(os.path.join(p, "node"))))')
+          echo "fuera del PATH: ${con:-nada}"
+          if [ -z "$con" ]; then
+            echo "::error::ningun directorio del PATH publica node: no habria nada que medir"
+            exit 1
+          fi
+          if PATH="$sin" command -v node; then
+            echo "::error::node sigue resolviendo con el PATH filtrado"
+            exit 1
+          fi
+          echo "path=$sin" >> "$GITHUB_OUTPUT"
+
+      - name: estatico sin node, sobre fixtures sanos
+        id: estatico_sin_node
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          source: fixtures/engine.ts
+          reference: fixtures/anchors.json
+          backend: estatico
+          receipt-file: estatico_ok.txt
+
+      - name: estatico sin node, sobre un reference desplazado
+        id: estatico_desvio
+        continue-on-error: true
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          source: fixtures/engine.ts
+          reference: desplazado.json
+          backend: estatico
+          receipt-file: estatico_desvio.txt
+
+      - name: node pedido y ausente
+        id: node_ausente
+        continue-on-error: true
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          source: fixtures/engine.ts
+          reference: fixtures/anchors.json
+          backend: node
+          receipt-file: node_ausente.txt
+
+      - name: el backend estatico mide de verdad, y no degrada en silencio
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+          RC_ESTATICO: ${{ steps.estatico_sin_node.outputs.rc }}
+          RES_DESVIO: ${{ steps.estatico_desvio.outcome }}
+          RC_DESVIO: ${{ steps.estatico_desvio.outputs.rc }}
+          RES_NODO: ${{ steps.node_ausente.outcome }}
+          RC_NODO: ${{ steps.node_ausente.outputs.rc }}
+        run: |
+          # Exit 2 from `backend: node` on this PATH is the witness that the composite action
+          # itself ran without node: with node reachable it would have returned 0. Without that
+          # witness the green below could come from a step whose PATH was never touched.
+          test "$RES_NODO" = "failure"
+          test "$RC_NODO" = "2"
+          grep -q '^rc=2$' node_ausente.txt
+
+          test "$RC_ESTATICO" = "0"
+          grep -q '^rc=0$' estatico_ok.txt
+          # The receipt names the backend, so the mode is declared rather than inferred from the
+          # fact that node happened to be missing.
+          grep -q '"backend": "estatico"' estatico_ok.txt
+          grep -q '"peor_rel": 0.0' estatico_ok.txt
+
+          # A backend that answered 0 on good input and 0 on bad input would pass the rows above.
+          # The divergent fixture is what says the check still judges.
+          test "$RES_DESVIO" = "failure"
+          test "$RC_DESVIO" = "1"
+          grep -q '^rc=1$' estatico_desvio.txt
+          grep -q DIVERGE estatico_desvio.txt
+
+          # The action captures stdout only, so the motive of a NO_MEDIDO reaches the log and not
+          # the receipt. Read it from the module on the same PATH: a code without a cause is not
+          # a verdict a reader can act on.
+          motivo=$(PYTHONPATH=. python3 -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
+            --referencia fixtures/anchors.json --backend node 2>&1 >/dev/null) || true
+          echo "motivo: $motivo"
+          case "$motivo" in
+            "NO_MEDIDO · SIN_ORACULO_VIVO · node >= 22.6 no esta disponible") ;;
+            *) echo "::error::el 2 no nombra su causa: $motivo"; exit 1 ;;
+          esac
+
+      - name: el censo del contrato, sin node
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        run: |
+          # The SIN_NODO rows of the census have never fired on a runner: the test job always has
+          # node. Here the declared-empty cells are the ones being exercised.
+          python3 tools/contrato_censo.py

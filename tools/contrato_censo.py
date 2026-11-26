@@ -66,6 +66,19 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
                                     "la referencia aporta nombres, no valores. Juzga "
                                     "`anchor_oracle --backend node`") if nodo else
                                    (SIN_NODO, lo_motivo))
+    # El quinto codigo de `anchor_oracle` no es un codigo: es el modo. Las cinco filas de arriba
+    # corren en `auto`, que elige node siempre que puede, asi que miden un solo backend de los dos.
+    # `estatico` no toca node ni con node disponible; la celda del 2 de "modo pedido y no
+    # disponible" cambia de clase con el entorno — declarada donde el modo corre, medida donde el
+    # modo no puede correr —, y ninguna de las dos lecturas es un verde mudo.
+    fila_node = (
+        ("anchor_oracle", RC_NO_MEDIDO,
+         ("--fuente", eng, "--referencia", ref, "--backend", "node"),
+         RC_OK, POR_DISENO, "con node >= 22.6 el modo pedido corre: el 2 no se alcanza")
+        if nodo else
+        ("anchor_oracle", RC_NO_MEDIDO,
+         ("--fuente", eng, "--referencia", ref, "--backend", "node"),
+         RC_NO_MEDIDO, MEDIDO, ""))
     filas = [
         ("anchor_oracle", RC_OK, ("--fuente", eng, "--referencia", ref), RC_OK, MEDIDO, ""),
         ("anchor_oracle", RC_DIVERGE, ("--fuente", eng, "--referencia", malo), RC_DIVERGE, MEDIDO, ""),
@@ -74,6 +87,9 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
         ("anchor_oracle", RC_NO_MEDIDO, ("--fuente", eng, "--referencia", vacia),
          RC_NO_MEDIDO, MEDIDO, "una referencia sin nombres no conforma nada"),
         ("anchor_oracle", RC_ARITY, ("--inexistente",), RC_ARITY, MEDIDO, ""),
+        ("anchor_oracle", RC_OK, ("--fuente", eng, "--referencia", ref, "--backend", "estatico"),
+         RC_OK, MEDIDO, ""),
+        fila_node,
 
         ("live_oracle", RC_OK, ("--fuente", eng, "--referencia", ref), lo_ok, lo_clase, lo_motivo),
         ("live_oracle", RC_DIVERGE, ("--fuente", eng, "--referencia", malo), lo_ok,

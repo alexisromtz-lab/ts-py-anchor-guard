@@ -177,8 +177,10 @@ runs:
         printf 'rc=%s\n' "$rc" >> "$destino"
         printf 'receipt=%s\n' "$recibo" >> "$destino"
 
-        # Measured: a step that exits non-zero publishes no outputs at all, so a caller that
-        # needs the receipt of a failure has to ask for a file before the step ends.
+        # Outputs do survive a failing step (measured, run 45842813192); this file is not a
+        # workaround for that. It is here because a receipt is evidence worth keeping: an
+        # artifact upload, or a reader coming back later, wants a file rather than the outputs
+        # of a step it can no longer re-run.
         if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
           {
             printf 'rc=%s\n' "$rc"
