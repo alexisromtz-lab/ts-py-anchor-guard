@@ -248,6 +248,19 @@ stops shipping `node` breaks the job loudly instead of turning the axis into a n
 (`--backend node` is `POR_DISENO · RC_OK` when `node` is present and `MEDIDO · RC_NO_MEDIDO`
 when it is not), so the grid measures the axis instead of deducing it.
 
+Run `45848898559` on `75da161`
+([link](https://github.com/alexisromtz-lab/ts-py-anchor-guard/actions/runs/45848898559)) is where
+that axis stopped being a promise. On `ubuntu-latest` the filter removed `/usr/local/bin`, the
+action ran on the filtered `PATH`, and the two witnesses came back as predicted: `0` with
+`"backend": "estatico"` and `"peor_rel": 0.0`, and `NO_MEDIDO · SIN_ORACULO_VIVO · node >= 22.6
+no esta disponible` for `backend: node`. The same run answers a question this file would
+otherwise have to guess at: an `env:` block on a step that says `uses:` **is** inherited by the
+composite's `run:` steps — the filtered `PATH` shows up in the step's own environment in the log,
+and the `2` proves it reached the script. Whether an `env:` block declared on a `uses:` step
+crosses into the composite's own `run:` blocks is what decided whether this axis could be tested
+at all, so it was measured here rather than cited: the documented `env` context describes a
+step's own `run:`, and the part that mattered was the one the docs leave to the runner.
+
 **What is measured, and what is not.** The seven runs below were executed by hand on 2026-11-25 with
 the `run:` block extracted from `action.yml` and `GITHUB_OUTPUT`/`GITHUB_STEP_SUMMARY` pointed at
 files — on node `v24.15.0`, Python 3.12.13:
@@ -262,18 +275,19 @@ files — on node `v24.15.0`, Python 3.12.13:
 | `check` misspelled | `20` | names the three accepted values |
 | `check=probe` with 2 bands | `2` | `NO_MEDIDO · PERFIL_INVALIDO · hacen falta al menos 3 bandas` |
 
-The `action` job in `ci.yml` then takes over: seven steps with `uses: ./` — three self-tests, the
-fixtures, and the three node-free runs below — one step asserting `steps.oraculo.outputs.rc == 0`,
-and a negative control that generates a `reference` displaced by one unit, runs the action on it
-with `continue-on-error: true`, and asserts that the step **failed**, that `rc` is `1`, and that
-the `receipt` carries `DIVERGE`. A job that only proves the happy path proves the step runs, not
-that it judges.
+The `action` job in `ci.yml` then takes over: fourteen steps, eight of which run the action
+itself — three module self-tests, the fixtures, the negative control, and the three node-free runs
+described above — with the rest asserting what those runs returned: `rc == 0` and a zero worst
+error on the fixtures, a `reference` displaced by one unit that has to make the step **fail** with
+`rc: 1` and `DIVERGE` in its `receipt-file`, and the exact `NO_MEDIDO` reason from the node-free
+witness. A job that only proves the happy path proves the step runs, not that it judges.
 
 Run `45842968869` on `bef8f75`
 ([link](https://github.com/alexisromtz-lab/ts-py-anchor-guard/actions/runs/45842968869)) finished
 with `action: success`, one step red on purpose inside it, and the three interpreter jobs green.
 That is what turns the seven rows above from a local measurement of a script into a measurement
-of the action.
+of the action. Run `45848898559` on `75da161` supersedes it as the current witness: same job, the
+six node-free steps added, and the verdicts cited in the section above.
 
 **Pin a tag or a sha, never `main`.** A tag is cut only on a commit whose `action` job came back
 green, which is why this file does not list its own tags — that sentence would go stale the
