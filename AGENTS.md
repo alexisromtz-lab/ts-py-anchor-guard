@@ -60,6 +60,22 @@ appear here. The fixtures are synthetic on purpose.
   less than 64 MiB free it returns `NO_MEDIDO` instead of a table, because a red that comes
   from the disk is indistinguishable from a red that comes from the mutation.
 
+- **A pointer to a hole is a claim: read the table that owns it.** A file that "has no mutants"
+  had ten when the census was run instead of remembered. A gap that a previous session measured
+  is a measurement of that session's tree; re-read the table before designing work around it.
+  And when the instrument is asked to watch itself, note what it cannot see: it deletes its own
+  test from every copy, so a mutant on the harness reports `VIVO` for want of a judge.
+- **A motive names the cause, not the runner.** The last line of a child process's `stderr` is
+  often its own version banner (`node rc 1: Node.js v24.15.0`), while the `SyntaxError` that
+  matters sits three lines above. A motive that quotes the last line sends the reader to the
+  wrong file, and every test still passes because the field is non-empty. Prefer the last line
+  that names an error, fall back to the last one, and assert that the banner is *absent*.
+- **A guard whose producer cannot emit the shape is a declaration, not coverage.** The `bool`
+  exclusion in `live_oracle` cannot fire because the probe answers `typeof v`; the mutant that
+  removes it survives, and the honest response is to declare the exemption with the measurement
+  that proves it, not to write a test that appears to cover it. The test that seemed to cover it
+  asserted `[None]` from a reference carrying `None`, which the probe never reads.
+
 - **A crash is not a verdict: `1` carries two meanings.** `1` says "the subject diverges",
   and it is also the status of a Python process whose instrument raised. A module that lets an
   exception escape therefore reports a defect of the *subject* when the defect is its own, and a

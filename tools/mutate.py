@@ -200,6 +200,27 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      '        fila["conforme"] = proc.returncode == fila["esperado"] and not fila["choque"]',
      '        fila["conforme"] = proc.returncode == fila["esperado"]',
      "el censo vuelve a aceptar un traceback como la celda de divergencia"),
+    ("ao_tol_borde_exclusivo", "ts_py_anchor_guard/anchor_oracle.py",
+     "if error > tolerancia:", "if error >= tolerancia:",
+     "el borde de la tolerancia pasa de exclusivo a inclusivo: un error igual a la "
+     "tolerancia deja de conformar"),
+    ("lo_bool_conforma", "ts_py_anchor_guard/live_oracle.py",
+     "isinstance(v, (int, float)) and not isinstance(v, bool) else None",
+     "isinstance(v, (int, float)) else None",
+     "un `true` de TypeScript se lee como 1: True ya es int en Python"),
+    ("lo_motivo_sin_causa", "ts_py_anchor_guard/live_oracle.py",
+     'next((linea for linea in reversed(lineas) if "Error" in linea),',
+     'next((linea for linea in reversed(lineas) if False),',
+     "el motivo vuelve a citar el banner de version de node en vez de la causa"),
+    ("lo_frontera_sin_flag", "ts_py_anchor_guard/live_oracle.py",
+     "if (mayor, menor) >= _SIN_FLAG:", "if (mayor, menor) > _SIN_FLAG:",
+     "la version frontera (la primera que corre sin flag) cae al lado que pasa el flag"),
+    ("ce_control_uno_apagado", "tools/contrato_censo.py",
+     "if evaluar(falso, raiz=raiz)[1] != RC_DIVERGE:", "if False:",
+     "el control negativo de expectativa imposible deja de ejercitarse"),
+    ("ce_tabla_choque_invertido", "tools/contrato_censo.py",
+     'if f.get("choque") else', 'if not f.get("choque") else',
+     "la tabla nombra la causa contraria: un choque se publica como codigo equivocado"),
 )
 
 # El modulo de prueba que le corresponde a cada fuente, indexado por la ruta de la fuente.
@@ -228,6 +249,7 @@ INALCANZABLES = {
     "sp_curvatura_cero": "curvatura == 0 exige empate triple con c0 minimo",
     "sp_solape_min": "2*max_shift + 8 > min(len) ya rechaza esos insumos antes",
     "au_fd_solo_w": "medido: el bytecode por descriptor se abre 'wb'; ningun evento usa 'xb'",
+    "lo_bool_conforma": "medido: el probe contesta {\"flag\":[\"boolean\"]}, nunca un booleano",
 }
 
 

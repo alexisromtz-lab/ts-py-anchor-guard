@@ -46,6 +46,39 @@ class ContratoCenso(unittest.TestCase):
         self.assertFalse(filas[0]["conforme"], "un choque paso por divergencia medida")
         self.assertEqual(rc, 1)
 
+    def test_el_primer_control_negativo_se_ejercita(self):
+        """`--self-test` answering 0 only says the census agrees today, not that it can say no.
+
+        Sabotage `evaluar` so every row conforms, then read *which* control spoke: the second
+        control fires on the same sabotage, so a test that only checked the exit code would
+        pass with the first control removed.
+        """
+        original = censo.evaluar
+
+        def siempre_conforme(filas, *, raiz):
+            for fila in filas:
+                fila.update(obtenido=fila["esperado"], choque=False, conforme=True)
+            return filas, censo.RC_OK
+
+        censo.evaluar = siempre_conforme
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                rc = censo._autotest(RAIZ)
+        finally:
+            censo.evaluar = original
+        self.assertEqual(rc, censo.RC_DIVERGE, "el control negativo no dispara")
+        self.assertIn("expectativa imposible", err.getvalue(),
+                      f"el control que disparo no fue el primero: {err.getvalue()!r}")
+
+    def test_la_tabla_nombra_el_choque_y_no_un_codigo_equivocado(self):
+        fila = {"modulo": "control", "codigo": 1, "esperado": 1, "clase": "", "motivo": "",
+                "args": [], "orden": [sys.executable, "-c", "raise RuntimeError('boom')"]}
+        filas, _ = censo.evaluar([fila], raiz=RAIZ)
+        texto = censo._tabla(filas)
+        self.assertIn("CHOQUE", texto)
+        self.assertNotIn("devolvio", texto)
+
     def test_las_celdas_vacias_se_declaran_con_su_motivo(self):
         from ts_py_anchor_guard.live_oracle import version_de_nodo
 

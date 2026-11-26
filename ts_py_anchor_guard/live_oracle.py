@@ -116,8 +116,14 @@ def medir(fuente: str, referencia: dict, *, nodo: tuple[str, list[str]] | None =
         except (OSError, subprocess.SubprocessError) as fallo:
             return {}, f"node no corrida: {fallo}"
         if corrida.returncode != 0:
-            ultimo = (corrida.stderr or "").strip().splitlines()[-1:]
-            return {}, f"node rc {corrida.returncode}: {' '.join(ultimo)}"
+            # The last line of node's stderr is its own version banner, not the cause: a
+            # motive that reads `node rc 1: Node.js v24.15.0` names the runner and hides the
+            # `SyntaxError` three lines above it, which is the only part a reader can act on.
+            lineas = [linea.strip() for linea in (corrida.stderr or "").splitlines()
+                      if linea.strip()]
+            causa = next((linea for linea in reversed(lineas) if "Error" in linea),
+                         lineas[-1] if lineas else "")
+            return {}, f"node rc {corrida.returncode}: {causa}"
         try:
             crudo = json.loads(corrida.stdout)
         except json.JSONDecodeError:

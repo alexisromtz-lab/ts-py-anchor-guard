@@ -35,7 +35,7 @@ __all__ = ["RC_OK", "RC_DIVERGE", "RC_NO_MEDIDO", "RC_ARITY"] + [
     nombre for nombres in _MODULOS.values() for nombre in nombres]
 
 RC_OK, RC_DIVERGE, RC_NO_MEDIDO, RC_ARITY = 0, 1, 2, 20
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 
 
 def __getattr__(nombre: str):

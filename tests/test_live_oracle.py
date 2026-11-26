@@ -45,6 +45,21 @@ class OraculoVivoTest(unittest.TestCase):
         vivos, motivo = live_oracle.medir("export const A = ;", {"A": 1})
         self.assertEqual(vivos, {})
         self.assertIn("node rc", motivo)
+        # The last line of node's stderr is its version banner; the cause is three lines up.
+        self.assertIn("Error", motivo, f"el motivo no nombra la causa: {motivo!r}")
+        self.assertNotIn("Node.js v", motivo, f"el motivo nombra el runner: {motivo!r}")
+
+    def test_un_booleano_no_se_lee_como_uno(self):
+        """A TS `true` arrives as the name of its type, never as the boolean itself.
+
+        Measured: the probe answers `{"flag":["boolean"]}` for an exported `true`, so the
+        value that reaches Python is a string. `assertEqual` against `[None]` is the strong
+        assertion because `[True] == [1]` in Python: were the raw boolean to arrive, this
+        would fail even with the `isinstance(v, bool)` filter removed.
+        """
+        vivos, _ = live_oracle.medir("export const flag = true;", {"flag": True})
+        self.assertEqual(vivos["flag"], [None])
+        self.assertNotEqual(vivos["flag"], [1])
 
     def test_una_caja_temporal_llena_es_un_motivo_y_no_una_excepcion(self):
         with mock.patch.object(pathlib.Path, "write_text",

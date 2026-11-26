@@ -127,6 +127,20 @@ provokes one; and the census refuses a run whose stderr carries a traceback in a
 `1`. The exit codes are unchanged for every input that was already contracted: the patch moves
 because return paths were added.
 
+`0.4.5` is the harness growing where the table was thin, and it found one defect in the code
+it was measuring. Six mutants were added over the three sites with the worst ratio of lines to
+mutants (`anchor_oracle` 92.7, `live_oracle` 74.7, `contrato_censo` 62.3); five die. The one
+that did not is now the fifth declared exemption, and its reason is a measurement rather than
+an argument: the node probe answers `typeof v`, so an exported `true` arrives as the string
+`"boolean"` and the `isinstance(v, bool)` branch it protects has no producer. The defect came
+from `lo_motivo_sin_causa`: `medir()` reported `node rc 1: Node.js v24.15.0` — the last line of
+`stderr`, which is Node's version banner — while the cause, a `SyntaxError`, sat three lines
+above it. A motive that names the runner sends the reader to the wrong file. It now prefers the
+last line containing `Error` and falls back to the last one. Two tests written for these mutants
+passed for the wrong reason before they were fixed: one fed `None` as the reference, so the
+probe never read the export, and one asserted only the exit code while a second negative control
+fired on the same sabotage.
+
 ## `anchor_oracle`: exact arithmetic parity
 
 Reads the declaration subset where exact comparison is meaningful — numeric constants,
@@ -323,7 +337,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `40` of `44` mutants killed; the other `4` cannot be reached by any input | 44 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 44 mutations and names the four exemptions with their reason |
+| `45` of `50` mutants killed; the other `5` cannot be reached by any input | 50 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 50 mutations and names the five exemptions with their reason |
 | `15` of `18` contract rows measured; the other `3` declared with their motive | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, and no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -336,10 +350,10 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 44 mutations, 40 killed
+### What the tests would notice: 50 mutations, 45 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 44 one-line
+open the fixture" but "if the code were wrong, would anything go red" — so 50 one-line
 mutations are applied across eight sites (the four modules, the CLI, and the three harness
 probes), each in a fresh copy, each followed by the whole suite.
 
@@ -365,13 +379,24 @@ probes), each in a fresh copy, each followed by the whole suite.
   straight to the predicate, with a `.ts` write as the positive control.
 - **34 of 38 died** while the escape routes of `0.4.4` were still open, and the four
   survivors were the declared ones in the table below.
-- **40 of 44 die now.** Four mutants were added over the routes that let a crash look like a
-  verdict, and all four die: one that removes the boundary's translation (`cli_choque_escapa`),
+- **40 of 44 died** when the escape routes of `0.4.4` were the last thing added. Four mutants
+  were added over the routes that let a crash look like a
+  verdict, and all four died: one that removes the boundary's translation (`cli_choque_escapa`),
   one that turns the translated crash back into `1` (`cli_choque_es_uno`), one that lets an
   empty reference conform again (`ao_ref_vacia_ok`), one that lets the reader print nulls with `0`
   (`lo_nulos_conforman`) — plus the short profile (`sp_perfil_escapa`) and the census's own
-  blind spot (`ce_choque_conforma`). The four survivors are the declared ones below, and the
-  script reports `huecos de cobertura: ninguno` — zero undeclared holes — with exit code `0`.
+  blind spot (`ce_choque_conforma`). The four survivors were the declared ones below.
+- **45 of 50 die now.** The four of `0.4.4` were joined by six more over the three thinnest
+  sites the table had — `anchor_oracle` at 92.7 lines per mutant, `live_oracle` at 74.7,
+  `contrato_censo` at 62.3 — and five die: the exclusive edge of a tolerance
+  (`ao_tol_borde_exclusivo`, `>` → `>=`), the motive that has to name a cause rather than the
+  last line of `stderr` (`lo_motivo_sin_causa`), the version frontier
+  (`lo_frontera_sin_flag`, `>=` → `>`), the census's first negative control
+  (`ce_control_uno_apagado`), and the choice between `CHOQUE:` and "returned N" in its cause
+  column (`ce_tabla_choque_invertido`). The sixth, the boolean filter, is the fifth declared
+  exemption: the probe reports `typeof`, so what reaches Python for an exported `true` is the
+  string `"boolean"` and no boolean ever arrives. Measured run: `aplicables: 50 · muertos: 45 ·
+  vivos: 5 · flaky: 0 · huecos de cobertura: ninguno`, exit code `0`.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to
@@ -438,9 +463,10 @@ Four rules make the report trustworthy. All four were learned by getting them wr
   so the repeat read the compiled module and the mutant became invisible. Each run now copies
   the whole tree instead of cleaning selectively.
 
-**Four mutants cannot be killed by any test, and that is the finding, not an omission.** Three
-are guards the arithmetic makes unreachable, and one is a branch whose input nothing produces.
-No input distinguishes them from the original, so no test can:
+**Five mutants cannot be killed by any test, and that is the finding, not an omission.** Three
+are guards the arithmetic makes unreachable, one is a branch whose input nothing produces, and
+one is a filter the producer empties before it. No input distinguishes them from the original,
+so no test can:
 
 | mutant | why no input reaches it |
 |---|---|
@@ -448,6 +474,7 @@ No input distinguishes them from the original, so no test can:
 | `curvatura <= 0` → `curvatura < 0` | `curvatura == 0` needs `c_menos + c_mas == 2*c0` with `c0` a minimum, i.e. a three-way tie, which exact integer sums can produce only by making the parabola flat everywhere — not with `_ssd` over distinct shifts |
 | allow bands with fewer than 2 samples of overlap | the `2*max_shift + 8 > min(len)` check already refuses those inputs, so the later guard is shadowed by the earlier one from every public entry point |
 | read bytecode by descriptor only on `'xb'` | measured: the interpreter opens `__pycache__` files with mode `'wb'`, so the `'xb'` arm of the filter has no producer. The observable half — that the probe does not leave bytecode behind — is pinned by `test_la_sonda_no_deja_bytecode_en_el_arbol`, which does kill the mutant that removes `-B` |
+| read a value as `null` unless it is a number, without excluding `bool` | measured: the node probe answers `typeof v` for anything that is not a number, so an exported `true` reaches Python as the string `"boolean"`. `isinstance(True, int)` is `True` here, which is why the exclusion is written; nothing the probe produces can exercise it |
 
 Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks for
 it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
