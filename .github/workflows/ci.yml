@@ -95,7 +95,8 @@ jobs:
         run: |
           # A job that only proves the happy path proves the step runs, not that it judges.
           test "$RESULTADO" = "failure"
-          # A failed step publishes no outputs; the file is the only channel that survives.
-          test -z "$RC_DEL_STEP"
+          # Outputs do survive a failure — the empty value in run 45842378293 was `bash -e`
+          # killing the script, not the runner dropping the field. Assert both channels.
+          test "$RC_DEL_STEP" = "1"
           grep -q '^rc=1$' desvio.txt
           grep -q DIVERGE desvio.txt
