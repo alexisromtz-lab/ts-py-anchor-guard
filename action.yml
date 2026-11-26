@@ -26,6 +26,12 @@ inputs:
     description: '`anchor`: JSON `{name: value}` or `{name: {puntos, valores}}`.'
     required: false
     default: ""
+  manifest:
+    description: >-
+      `anchor`: a versioned manifest of signed correspondences. Takes the place of `source` and
+      `reference`, and measures every pair it declares.
+    required: false
+    default: ""
   backend:
     description: '`anchor`: who produces the reference values — `auto`, `node` or `estatico`.'
     required: false
@@ -85,6 +91,7 @@ runs:
         ENTRADA_SELF_TEST: ${{ inputs.self-test }}
         ENTRADA_SOURCE: ${{ inputs.source }}
         ENTRADA_REFERENCE: ${{ inputs.reference }}
+        ENTRADA_MANIFEST: ${{ inputs.manifest }}
         ENTRADA_BACKEND: ${{ inputs.backend }}
         ENTRADA_TOLERANCE: ${{ inputs.tolerance }}
         ENTRADA_PROFILE_A: ${{ inputs.profile-a }}
@@ -122,11 +129,21 @@ runs:
         else
           case "$ENTRADA_CHECK" in
             anchor)
-              if [ -z "$ENTRADA_SOURCE" ] || [ -z "$ENTRADA_REFERENCE" ]; then
-                echo "::error title=ts-py-anchor-guard::check=anchor needs source and reference"
-                exit 20
+              if [ -n "$ENTRADA_MANIFEST" ]; then
+                # A manifest carries its own source, reference and mappings per pair: asking
+                # for `source` here would demand an argument the manifest already answers.
+                if [ -n "$ENTRADA_SOURCE" ] || [ -n "$ENTRADA_REFERENCE" ]; then
+                  echo "::error title=ts-py-anchor-guard::manifest excludes source and reference"
+                  exit 20
+                fi
+                args+=(--manifest "$ENTRADA_MANIFEST")
+              else
+                if [ -z "$ENTRADA_SOURCE" ] || [ -z "$ENTRADA_REFERENCE" ]; then
+                  echo "::error title=ts-py-anchor-guard::check=anchor needs source and reference, or a manifest"
+                  exit 20
+                fi
+                args+=(--fuente "$ENTRADA_SOURCE" --referencia "$ENTRADA_REFERENCE")
               fi
-              args+=(--fuente "$ENTRADA_SOURCE" --referencia "$ENTRADA_REFERENCE")
               args+=(--backend "${ENTRADA_BACKEND:-auto}" --tolerancia "${ENTRADA_TOLERANCE:-0.0}")
               ;;
             probe)

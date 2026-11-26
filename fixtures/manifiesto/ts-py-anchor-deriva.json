@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "pares": [
+    {
+      "nombre": "motor",
+      "fuente": "motor.ts",
+      "referencia": "referencia-deriva.json",
+      "mapeos": {
+        "CUADRO.ancho": "CUADRO.0",
+        "CUADRO.alto": "CUADRO.1",
+        "VENTANA.ancho": "VENTANA.0",
+        "VENTANA.alto": "VENTANA.1",
+        "NUDOS_S5.0": "RAMPA_S5.0",
+        "NUDOS_S5.1": "RAMPA_S5.1",
+        "NUDOS_S5.2": "RAMPA_S5.2",
+        "NUDOS_S5.3": "RAMPA_S5.3",
+        "NUDOS_S5.4": "RAMPA_S5.4"
+      }
+    }
+  ]
+}

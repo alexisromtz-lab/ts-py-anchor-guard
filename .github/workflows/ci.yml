@@ -209,3 +209,93 @@ jobs:
           # The SIN_NODO rows of the census have never fired on a runner: the test job always has
           # node. Here the declared-empty cells are the ones being exercised.
           python3 tools/contrato_censo.py
+
+      # --- the manifest: a repository signs its own correspondence map ---
+      # Same filtered PATH as above, so this section also says the manifest path needs no
+      # runtime beyond Python.
+      - name: manifiesto conforme
+        id: manifiesto
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          manifest: fixtures/manifiesto/ts-py-anchor.json
+          backend: estatico
+          receipt-file: manifiesto.txt
+
+      - name: manifiesto con la cobertura exigida
+        id: manifiesto_exigido
+        continue-on-error: true
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          manifest: fixtures/manifiesto/ts-py-anchor-exigido.json
+          backend: estatico
+          receipt-file: manifiesto_exigido.txt
+
+      - name: manifiesto contra una referencia derivada
+        id: manifiesto_deriva
+        continue-on-error: true
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          manifest: fixtures/manifiesto/ts-py-anchor-deriva.json
+          backend: estatico
+          receipt-file: manifiesto_deriva.txt
+
+      - name: manifiesto y source a la vez
+        id: manifiesto_aritmetica
+        continue-on-error: true
+        uses: ./
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+        with:
+          check: anchor
+          manifest: fixtures/manifiesto/ts-py-anchor.json
+          source: fixtures/engine.ts
+
+      - name: el manifiesto mide, exige y no degrada
+        env:
+          PATH: ${{ steps.sin_node.outputs.path }}
+          RC_MANIFIESTO: ${{ steps.manifiesto.outputs.rc }}
+          RES_EXIGIDO: ${{ steps.manifiesto_exigido.outcome }}
+          RC_EXIGIDO: ${{ steps.manifiesto_exigido.outputs.rc }}
+          RES_DERIVA: ${{ steps.manifiesto_deriva.outcome }}
+          RC_DERIVA: ${{ steps.manifiesto_deriva.outputs.rc }}
+          RES_ARITMETICA: ${{ steps.manifiesto_aritmetica.outcome }}
+          RC_ARITMETICA: ${{ steps.manifiesto_aritmetica.outputs.rc }}
+        run: |
+          test "$RC_MANIFIESTO" = "0"
+          grep -q '^rc=0$' manifiesto.txt
+          # Nine members were compared through the declared mappings; four roots are declared
+          # and one of them (SIN_PAR) nobody measures. A receipt that reported zero compared
+          # anchors would be green over an empty subject.
+          grep -q '"comparadas": 9' manifiesto.txt
+          grep -q '"declaradas": 4' manifiesto.txt
+          # The key no mapping reaches is counted, not swallowed.
+          grep -q '"ignoradas": 1' manifiesto.txt
+          grep -q '"backend": "estatico"' manifiesto.txt
+
+          # Signing total coverage turns the same subject into a gap, and the gap names itself.
+          test "$RES_EXIGIDO" = "failure"
+          test "$RC_EXIGIDO" = "2"
+          grep -q '^rc=2$' manifiesto_exigido.txt
+          grep -q COBERTURA_INCOMPLETA manifiesto_exigido.txt
+          grep -q SIN_PAR manifiesto_exigido.txt
+
+          # A manifest that always conformed would pass every row above: the drifted reference
+          # is what says the aggregate still judges.
+          test "$RES_DERIVA" = "failure"
+          test "$RC_DERIVA" = "1"
+          grep -q '^rc=1$' manifiesto_deriva.txt
+          grep -q DIVERGE manifiesto_deriva.txt
+          grep -q NUDOS_S5.1 manifiesto_deriva.txt
+
+          # Two ways to name the same pair is one way too many, and the wrong one is refused.
+          test "$RES_ARITMETICA" = "failure"
+          test "$RC_ARITMETICA" = "20"

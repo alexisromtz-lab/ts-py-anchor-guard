@@ -537,7 +537,7 @@ def residuo_de_redondeo(valor: float) -> dict:
 
 def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
              anclas: dict[str, dict] | None = None, vivos: dict | None = None,
-             backend: str = "estatico") -> dict:
+             backend: str = "estatico", exigir_cobertura_total: bool = False) -> dict:
     """Compare every anchor the reference names against the value it expects.
 
     `referencia` is `{nombre: valor}` for constants or
@@ -555,6 +555,11 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     when given they replace this module's arithmetic, which is the point: a port compared
     against a second implementation of the same formula can agree for the wrong reason.
     The receipt names the `backend` that produced the numbers.
+
+    `exigir_cobertura_total` turns `cobertura.omitidas` from a report into a defect: a
+    repository that signs a manifest saying every anchor it declares is accounted for gets
+    `RC 2 · COBERTURA_INCOMPLETA` when one is not, and `cobertura.exigida` says in the
+    receipt which of the two readings applies.
     """
     if not isinstance(referencia, dict):
         return {"rc": RC_NO_MEDIDO, "causa": "INSUMO_ILEGIBLE",
@@ -647,7 +652,8 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     cubiertas = {f["ancla"].partition(".")[0] for f in filas}
     cubiertas.update(f["ancla"].partition(".")[0] for f in no_evaluables)
     cobertura = {"declaradas": len(anclas), "comparadas": len(filas),
-                 "omitidas": sorted(n for n in anclas if n not in cubiertas)}
+                 "omitidas": sorted(n for n in anclas if n not in cubiertas),
+                 "exigida": bool(exigir_cobertura_total)}
     if no_medidas:
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_DECLARADA",
                 "detalle": f"la fuente no declara {', '.join(sorted(no_medidas))}",
@@ -664,6 +670,16 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
         nombres = ", ".join(f["ancla"] for f in no_evaluables)
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_EVALUABLE",
                 "detalle": f"fuera del subconjunto legible: {nombres}",
+                "tolerancia": tolerancia, "anclas": filas,
+                "no_evaluables": no_evaluables, "backend": backend,
+                "cobertura": cobertura}
+    # A subset is reported and allowed, because one invocation is allowed to measure one
+    # question. A repository that signs a manifest saying otherwise gets a gap instead of a
+    # green: an anchor nobody declared how to read is indistinguishable from an anchor that
+    # was renamed, and both are absences that a gate must not wave through.
+    if exigir_cobertura_total and cobertura["omitidas"]:
+        return {"rc": RC_NO_MEDIDO, "causa": "COBERTURA_INCOMPLETA",
+                "detalle": f"la cobertura exigida omite {', '.join(cobertura['omitidas'])}",
                 "tolerancia": tolerancia, "anclas": filas,
                 "no_evaluables": no_evaluables, "backend": backend,
                 "cobertura": cobertura}
@@ -770,6 +786,30 @@ def _autotest() -> int:
     return RC_OK
 
 
+def medir_vivos(texto: str, referencia: dict, backend: str = "auto"):
+    """`(vivos, nombre del backend, fallo)`; an empty `fallo` means it ran or was not asked.
+
+    `auto` that finds no node falls back to this module's arithmetic without a word, which
+    is what `auto` means; `node` that finds none is a gap, because a mode that was asked
+    for and could not run is not the other mode.
+    """
+    if backend == "estatico":
+        return None, "estatico", None
+    from . import live_oracle
+
+    nodo = live_oracle.version_de_nodo()
+    if nodo is None:
+        if backend == "node":
+            return None, "estatico", ("SIN_ORACULO_VIVO", "node >= 22.6 no esta disponible")
+        return None, "estatico", None
+    vivos, motivo = live_oracle.medir(texto, referencia, nodo=nodo)
+    if motivo:
+        return None, "estatico", ("ORACULO_VIVO_FALLO", motivo)
+    version = subprocess.run([nodo[0], "--version"], capture_output=True,
+                             text=True).stdout.strip()
+    return vivos, "node " + version, None
+
+
 def main(argv: list[str] | None = None) -> int:
     from ._cli import InsumoFalta, ParserDeContrato, leer_texto, no_medido
 
@@ -784,9 +824,24 @@ def main(argv: list[str] | None = None) -> int:
                         help="quien produce los valores de referencia: node ejecuta la "
                              "fuente, estatico la evalua con este modulo")
     parser.add_argument("--self-test", "--autotest", dest="self_test", action="store_true")
+    parser.add_argument("--manifest", help="JSON que declara los pares y sus mapeos: "
+                                          "un recibo consolidado por repositorio")
+    parser.add_argument("--exigir-cobertura-total", dest="exigir_cobertura_total",
+                        action="store_true",
+                        help="un ancla declarada que nadie midio es un hueco, no un verde")
     args = parser.parse_args(argv)
     if args.self_test:
         return _autotest()
+    if args.manifest:
+        if args.fuente or args.referencia or args.censo:
+            print("uso: anchor_oracle.py --manifest M.json [--backend B] [--json]",
+                  file=sys.stderr)
+            return RC_ARITY
+        from .manifiesto import correr
+
+        return correr(args.manifest, backend=args.backend, json_out=args.json,
+                      tolerancia=args.tolerancia,
+                      exigir_cobertura_total=args.exigir_cobertura_total)
     if args.censo:
         if not args.fuente:
             print("uso: anchor_oracle.py --fuente F.ts --censo [--json]", file=sys.stderr)
@@ -805,7 +860,8 @@ def main(argv: list[str] | None = None) -> int:
               f"variables locales no se leen", file=sys.stderr)
         return RC_OK
     if not args.fuente or not args.referencia:
-        print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]",
+        print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]\n"
+              "     anchor_oracle.py --manifest M.json [--backend auto|node|estatico] [--json]",
               file=sys.stderr)
         return RC_ARITY
     try:
@@ -815,27 +871,13 @@ def main(argv: list[str] | None = None) -> int:
         return no_medido("INSUMO_FALTA", str(exc))
     except json.JSONDecodeError as exc:
         return no_medido("INSUMO_ILEGIBLE", f"referencia {args.referencia!r}: {exc}")
-    vivos, backend, motivo = None, "estatico", ""
-    if args.backend != "estatico":
-        from . import live_oracle
-
-        nodo = live_oracle.version_de_nodo()
-        if nodo is None:
-            motivo = "node >= 22.6 no esta disponible"
-            if args.backend == "node":
-                print(f"NO_MEDIDO · SIN_ORACULO_VIVO · {motivo}", file=sys.stderr)
-                return RC_NO_MEDIDO
-        else:
-            vivos, motivo = live_oracle.medir(texto, referencia, nodo=nodo)
-            if motivo:
-                # A mode that was asked for and could not run is a gap, not a quiet
-                # demotion to the other backend.
-                print(f"NO_MEDIDO · ORACULO_VIVO_FALLO · {motivo}", file=sys.stderr)
-                return RC_NO_MEDIDO
-            backend = "node " + subprocess.run(
-                [nodo[0], "--version"], capture_output=True, text=True).stdout.strip()
+    vivos, backend, fallo = medir_vivos(texto, referencia, args.backend)
+    if fallo:
+        print(f"NO_MEDIDO · {fallo[0]} · {fallo[1]}", file=sys.stderr)
+        return RC_NO_MEDIDO
     recibo = comparar(texto, referencia, tolerancia=args.tolerancia, vivos=vivos,
-                      backend=backend)
+                      backend=backend,
+                      exigir_cobertura_total=args.exigir_cobertura_total)
     if args.json:
         print(json.dumps(recibo, indent=2, sort_keys=True))
     elif recibo["rc"] == RC_OK:

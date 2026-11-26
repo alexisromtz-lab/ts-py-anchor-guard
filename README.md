@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.7.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.8.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -192,6 +192,18 @@ a renamed anchor (`NUDOS_S5` in TypeScript, `RAMPA_S5` in the port) is absent fr
 rather than counted as a hole. The minor moves because the receipt gained `cobertura` and one
 failure became a named row; no exit code changed.
 
+`0.8.0` moves the correspondence out of the caller's head and into the repository: a
+`ts-py-anchor.json` that declares which anchor of the source is which address of the reference,
+versioned with the code and reviewed like it. Against the same engine the manifest compares `12`
+anchors at `peor_rel 0.0` instead of refusing two containers, counts the `14` keys nobody
+measures instead of absorbing them, and turns the `16` declared-but-unmeasured roots into a named
+gap the moment a pair signs `exigir_cobertura_total`. Three things it cost: a mapping used to
+consume nothing, so `CUADRO` stayed `ANCLA_NO_EVALUABLE` with its members already at `0.0`; the
+aggregate receipt read `cobertura` unguarded and crashed on a pair that refused before producing
+one; and the pair's tolerance and backend had to be decided — the file wins, because a file can
+be reviewed and a command line cannot. The minor moves because the schema is new; no exit code
+did.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
@@ -217,6 +229,7 @@ and exits with the module's own code, so a divergence fails the step instead of 
 | `self-test` | `false` | all | run the module's own `--self-test` instead of measuring a subject |
 | `source` | — | `anchor` | the TypeScript file to read |
 | `reference` | — | `anchor` | the JSON file with the anchors to compare |
+| `manifest` | — | `anchor` | a versioned manifest of signed correspondences; takes the place of `source` and `reference` |
 | `backend` | `auto` | `anchor` | `auto` · `node` · `estatico` — the reader's own spelling, forwarded verbatim |
 | `tolerance` | `0.0` | all | relative tolerance; the receipt still reports the residual |
 | `canvas` | — | `embed` | `W H` of the host canvas |
@@ -438,6 +451,62 @@ Drift is caught at the scale this engine cares about: shifting `RAMPA_MEDIDA.0` 
 returns `RC 1 · DIVERGE` with `peor_abs 0.001`, `peor_rel 0.002203` and the rounding residual
 of the measured value.
 
+### A manifest: the correspondence is signed, not remembered
+
+Two of the four costs above end in a name — `CUADRO.0` against `CUADRO.ancho`, `NUDOS_S5`
+against `RAMPA_S5` — and both lived in my head, which is not a place a gate can read. The same
+engine, re-measured with the correspondence committed as data (`version 1`, 26-Nov-2026):
+
+```json
+{
+  "version": 1,
+  "pares": [
+    {
+      "nombre": "paneo",
+      "fuente": "paneo.ts",
+      "referencia": "ref-paneo.json",
+      "mapeos": {
+        "CUADRO.ancho": "CUADRO.0",
+        "CUADRO.alto":  "CUADRO.1",
+        "VENTANA.ancho": "VENTANA.0",
+        "VENTANA.alto":  "VENTANA.1"
+      },
+      "exigir_cobertura_total": false
+    }
+  ]
+}
+```
+
+| invocation, same four files | `rc` | what the receipt says |
+|---|---|---|
+| `--manifest ts-py-anchor.json` | `0` | `12` anchors compared at `peor_rel 0.0`; `20` declared, `16` omitted, `14` ignored |
+| `… --exigir-cobertura-total` | `2` | `COBERTURA_INCOMPLETA` naming the `11 + 5` roots it skipped |
+| `… RAMPA_MEDIDA.1` moved by `1/10 000` | `1` | `DIVERGE · NUDOS_S5.1 · peor_rel 0.000130873` |
+| the same files with no manifest | `2` | `ANCLA_NO_EVALUABLE · CUADRO, VENTANA`, `0` compared |
+
+What the file decides, and why each decision is a refusal rather than a convenience:
+
+- **A mapping measures; an inference would not.** `CUADRO.ancho → CUADRO.0` is a signature. A
+  reader that paired the members by position would be measuring its own guess, and the receipt
+  would say `0.0` about a pairing nobody declared.
+- **A key nobody addresses is counted, not compared.** A dump from the Python side carries keys
+  this contract never signed (`CONTRASTE`, `RED`, `MIN_CORTES`…); they come back as
+  `referencia_ignorada` and the count is in the totals. Silently absorbing them would hide a typo
+  in a mapping; refusing the file would make the manifest unusable.
+- **A mapping that does not resolve is `MAPEO_INVALIDO` (`rc 2`)** — and it never overwrites a
+  `DIVERGE`: a measured divergence is about the port, a broken signature is about the contract,
+  and the first one outranks the second.
+- **Every field is read or named.** `exigir_covertura_total` is `INSUMO_ILEGIBLE`, not "absent":
+  a misspelled switch is a gate that is off while its author believes it is on.
+- **Precedence is stated, not inherited.** `1` if any pair diverges, else `2` if any pair is a
+  gap, else `0`. Not `max()`: `2` is a gap, not a severity.
+- **The manifest outranks the command line** for `tolerancia` and `backend` — the file is
+  reviewed and the invocation is not. `--exigir-cobertura-total` is the one exception, and only
+  in the safe direction: it can turn a report into a defect, never a defect into a report.
+
+`fixtures/manifiesto/` is the same three shapes kept small, so `ci.yml` exercises the manifest
+under the node-less `PATH` before this paragraph is believed.
+
 ### Backend: measured by the engine's own runtime, or by this module
 
 By default the module evaluates the declarations it reads with its own arithmetic — a
@@ -565,7 +634,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `45` of `50` mutants killed under CPython 3.12.13, `44` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 50 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 50 mutations and names the exemptions with their reason, conditional ones included |
+| `55` of `60` mutants killed under CPython 3.12.13, `54` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 60 curated single-line mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 60 mutations and names the exemptions with their reason, conditional ones included |
 | `16` of `20` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `16` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -578,11 +647,11 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 50 mutations, 45 killed
+### What the tests would notice: 60 mutations, 55 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 50 one-line
-mutations are applied across eight sites (the four modules, the CLI, and the three harness
+open the fixture" but "if the code were wrong, would anything go red" — so 60 one-line
+mutations are applied across nine sites (the five modules, the CLI, and the three harness
 probes), each in a fresh copy, each followed by the whole suite.
 
 - **17 of 25 died** on the suite as it stood before the first pass of this section. Five of the
@@ -625,6 +694,21 @@ probes), each in a fresh copy, each followed by the whole suite.
   exemption: the probe reports `typeof`, so what reaches Python for an exported `true` is the
   string `"boolean"` and no boolean ever arrives. Measured run: `aplicables: 50 · muertos: 45 ·
   vivos: 5 · flaky: 0 · huecos de cobertura: ninguno`, exit code `0`.
+- **55 of 60 die now.** The manifest is the ninth site and the thinnest the table has ever had,
+  because it is the newest: ten mutants over its validation, its arithmetic and its precedence,
+  and all ten die. `mf_tolerancia_del_par_ignorada` and `mf_exigir_cli_no_rige` came from the
+  build rather than from review — the defaults that arrive from the invocation are the half of
+  the contract a reader of one function never sees: the pair's `tolerancia` and `backend` win
+  over the invocation's, and `--exigir-cobertura-total` may only *add* rigour, never relax what
+  a manifest already demands. The other eight cover the four refusals
+  (`mf_version_ignorada`, `mf_clave_sobrante`, `mf_exigir_no_bool`, `mf_mapeo_no_consume` — a
+  mapping that leaves the container inside makes every row compare against a shape that never
+  existed), the precedence rule itself (`mf_precedencia_max`, `max()` instead of "a `1` wins,
+  then a `2`"), the silence a covered drift needs (`mf_deriva_tapada`), the accounting that
+  keeps an ignored key out of the divisor (`mf_ignoradas_comparadas`), and the guard that
+  refuses to call a partial measurement complete (`mf_cobertura_sin_guardia`). Measured run of
+  the ten: `aplicables: 10 · muertos: 10 · vivos: 0 · flaky: 0 · huecos de cobertura: ninguno`,
+  exit code `0` — and put with the fifty of the run above, `60 · muertos: 55 · vivos: 5`.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to

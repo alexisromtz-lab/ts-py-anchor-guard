@@ -208,9 +208,30 @@ class ComparacionTest(unittest.TestCase):
         recibo = comparar(fuente, {"A": 1.0})
         self.assertEqual(recibo["rc"], RC_OK)
         self.assertEqual(recibo["cobertura"],
-                         {"declaradas": 3, "comparadas": 1, "omitidas": ["B", "f"]})
+                         {"declaradas": 3, "comparadas": 1, "omitidas": ["B", "f"],
+                          "exigida": False})
         completo = comparar(fuente, {"A": 1.0, "B": 2.0})
         self.assertEqual(completo["cobertura"]["omitidas"], ["f"])
+
+    def test_la_cobertura_exigida_convierte_un_omitido_en_hueco(self):
+        """A repository that signs for total coverage does not get to keep a partial green.
+
+        The same receipt that is `RC 0` when the subset is a report is `RC 2` when the
+        subset contradicts a declared expectation -- and the divergence still outranks it,
+        because a number that is wrong is a measurement while an anchor nobody read is not.
+        """
+        fuente = "export const A = 1;\nconst B = 2;\n"
+        parcial = comparar(fuente, {"A": 1.0})
+        self.assertEqual(parcial["rc"], RC_OK)
+        exigido = comparar(fuente, {"A": 1.0}, exigir_cobertura_total=True)
+        self.assertEqual(exigido["rc"], RC_NO_MEDIDO)
+        self.assertEqual(exigido["causa"], "COBERTURA_INCOMPLETA")
+        self.assertIn("B", exigido["detalle"])
+        self.assertTrue(exigido["cobertura"]["exigida"])
+        cubierto = comparar(fuente, {"A": 1.0, "B": 2.0}, exigir_cobertura_total=True)
+        self.assertEqual(cubierto["rc"], RC_OK)
+        deriva = comparar(fuente, {"A": 2.0}, exigir_cobertura_total=True)
+        self.assertEqual(deriva["rc"], RC_DIVERGE)
 
 
 class ContratoTest(unittest.TestCase):
