@@ -11,11 +11,16 @@ wrong"; and `viewport_embed` printed a receipt by reading `recibo["escala"]`, a 
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+from ts_py_anchor_guard import live_oracle
 
 RAIZ = Path(__file__).resolve().parents[1]
 MODULOS = ("anchor_oracle", "live_oracle", "subpixel_probe", "viewport_embed")
@@ -81,6 +86,100 @@ class ReciboDeDesborde(unittest.TestCase):
     def test_20_un_lienzo_de_lado_cero_es_invocacion_mala(self):
         p = correr("viewport_embed", "--canvas", "100", "0", "--ventana", "10", "10")
         self.assertEqual(p.returncode, RC_ARITY, p.stderr)
+
+
+class InsumoQueNoSePuedeMedir(unittest.TestCase):
+    """`1` is "the port diverges" and it is also what an uncaught exception returns.
+
+    A profile too short to divide into bands raised `PerfilInvalido` out of `main`, an empty
+    reference made `comparar` conform over zero anchors and then `max()` over an empty
+    sequence, and both left the process at `1` -- a verdict about the subject that no
+    measurement backed. Nothing was measured, so both answer `2` and name the reason.
+    """
+
+    def test_un_perfil_vacio_es_un_motivo_y_no_una_divergencia(self):
+        with tempfile.TemporaryDirectory() as caja:
+            vacio = Path(caja) / "vacio.txt"
+            vacio.write_text("")
+            p = correr("subpixel_probe", "--a", str(vacio), "--b", str(vacio))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · PERFIL_INVALIDO", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_una_referencia_vacia_no_conforma_nada(self):
+        with tempfile.TemporaryDirectory() as caja:
+            vacia = Path(caja) / "vacia.json"
+            vacia.write_text("{}")
+            p = correr("anchor_oracle", "--backend", "estatico", "--fuente",
+                       str(RAIZ / "fixtures" / "engine.ts"), "--referencia", str(vacia))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · REFERENCIA_VACIA", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_una_referencia_que_no_es_un_objeto_no_se_lee(self):
+        with tempfile.TemporaryDirectory() as caja:
+            lista = Path(caja) / "lista.json"
+            lista.write_text("[]")
+            p = correr("anchor_oracle", "--backend", "estatico", "--fuente",
+                       str(RAIZ / "fixtures" / "engine.ts"), "--referencia", str(lista))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · INSUMO_ILEGIBLE", p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_el_lector_sin_nombres_no_mide(self):
+        with tempfile.TemporaryDirectory() as caja:
+            vacia = Path(caja) / "vacia.json"
+            vacia.write_text("{}")
+            p = correr("live_oracle", "--fuente",
+                       str(RAIZ / "fixtures" / "engine.ts"), "--referencia", str(vacia))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · REFERENCIA_VACIA", p.stderr)
+
+    @unittest.skipUnless(live_oracle.version_de_nodo(), "node >= 22.6 no disponible")
+    def test_el_lector_con_una_fuente_sin_anclas_no_imprime_un_verde_vacio(self):
+        with tempfile.TemporaryDirectory() as caja:
+            vacia = Path(caja) / "vacia.ts"
+            vacia.write_text("// sin declaraciones\n")
+            p = correr("live_oracle", "--fuente", str(vacia), "--referencia",
+                       str(RAIZ / "fixtures" / "anchors.json"))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · SIN_ANCLAS_LEGIBLES", p.stderr)
+        self.assertNotIn("null", p.stdout)
+
+    @unittest.skipUnless(live_oracle.version_de_nodo(), "node >= 22.6 no disponible")
+    def test_un_ancla_que_existe_y_no_da_un_numero_tampoco_es_una_medicion(self):
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = Path(caja) / "etiqueta.ts"
+            fuente.write_text("export const etiqueta = (v: number) => String(v);\n")
+            ref = Path(caja) / "ref.json"
+            ref.write_text('{"etiqueta": {"puntos": [7]}}')
+            p = correr("live_oracle", "--fuente", str(fuente), "--referencia", str(ref))
+        self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+        self.assertIn("NO_MEDIDO · SIN_ANCLAS_LEGIBLES", p.stderr)
+        # The receipt names both causes: `medir` cannot tell a missing name from a string one.
+        self.assertIn("valor no numerico", p.stderr)
+
+
+class ElBordeTraduceElChoque(unittest.TestCase):
+    """The last net belongs to the boundary, and it must not swallow the subject's code."""
+
+    def test_una_falla_interna_sale_dos_y_nombra_su_tipo(self):
+        from ts_py_anchor_guard._cli import correr as borde
+
+        def revienta(argv=None):
+            raise RuntimeError("boom")
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(borde(revienta), RC_NO_MEDIDO)
+        self.assertIn("NO_MEDIDO · FALLA_INTERNA · RuntimeError: boom", err.getvalue())
+
+    def test_el_codigo_del_sujeto_pasa_intacto(self):
+        from ts_py_anchor_guard._cli import correr as borde
+
+        for codigo in (RC_OK, RC_DIVERGE, RC_NO_MEDIDO, RC_ARITY):
+            with self.subTest(codigo=codigo):
+                self.assertEqual(borde(lambda argv=None, c=codigo: c), codigo)
 
 
 if __name__ == "__main__":

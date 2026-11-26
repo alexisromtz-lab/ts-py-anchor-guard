@@ -60,6 +60,15 @@ appear here. The fixtures are synthetic on purpose.
   less than 64 MiB free it returns `NO_MEDIDO` instead of a table, because a red that comes
   from the disk is indistinguishable from a red that comes from the mutation.
 
+- **A crash is not a verdict: `1` carries two meanings.** `1` says "the subject diverges",
+  and it is also the status of a Python process whose instrument raised. A module that lets an
+  exception escape therefore reports a defect of the *subject* when the defect is its own, and a
+  test that compares `1` with an expected `1` will call that cell measured. Translate at the
+  boundary (`_cli.correr`: any exception becomes `2`, its type named, `SystemExit` passes
+  through so a test still sees the raise), never inside `main()`. The asymmetry hides on the
+  other side of a comparison too: a source with no anchors was `NO_MEDIDO` while its reference
+  with no names was a green with zero rows. Two sides of one measurement take the same guard.
+
 ## Style
 
 Docstrings state the invariant and why the naive version is wrong. Comments only where the

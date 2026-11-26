@@ -175,6 +175,31 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      "        except OSError as fallo:\n            return {}, f\"caja temporal no escribible: {fallo}\"\n        orden =",
      "        except OSError as fallo:\n            raise\n        orden =",
      "el disco lleno vuelve a salir como excepcion"),
+    ("cli_choque_escapa", "ts_py_anchor_guard/_cli.py",
+     "    except Exception as fallo:  # noqa: BLE001 - the boundary is where a last net belongs",
+     "    except ZeroDivisionError as fallo:",
+     "el borde deja de traducir el choque: vuelve el 1 que significa dos cosas"),
+    ("cli_choque_es_uno", "ts_py_anchor_guard/_cli.py",
+     "        print(f\"NO_MEDIDO · FALLA_INTERNA · {type(fallo).__name__}: {fallo}\", file=sys.stderr)\n"
+     "        return RC_NO_MEDIDO",
+     "        print(f\"NO_MEDIDO · FALLA_INTERNA · {type(fallo).__name__}: {fallo}\", file=sys.stderr)\n"
+     "        return RC_DIVERGE",
+     "un choque del instrumento se reporta como divergencia del sujeto"),
+    ("sp_perfil_escapa", "ts_py_anchor_guard/subpixel_probe.py",
+     "    except PerfilInvalido as exc:",
+     "    except KeyError as exc:",
+     "el perfil invalido vuelve a salir como traceback con rc 1"),
+    ("ao_ref_vacia_ok", "ts_py_anchor_guard/anchor_oracle.py",
+     "    if not referencia:", "    if False:",
+     "una referencia sin nombres vuelve a conformar con cero anclas"),
+    ("lo_nulos_conforman", "ts_py_anchor_guard/live_oracle.py",
+     "    if not any(v is not None for valores in vivos.values() for v in valores):",
+     "    if False:",
+     "el lector imprime nulls con rc 0 como si hubiera medido"),
+    ("ce_choque_conforma", "tools/contrato_censo.py",
+     '        fila["conforme"] = proc.returncode == fila["esperado"] and not fila["choque"]',
+     '        fila["conforme"] = proc.returncode == fila["esperado"]',
+     "el censo vuelve a aceptar un traceback como la celda de divergencia"),
 )
 
 # El modulo de prueba que le corresponde a cada fuente, indexado por la ruta de la fuente.

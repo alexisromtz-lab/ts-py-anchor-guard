@@ -99,12 +99,7 @@ through a descriptor, neither of which any run can display, because the child ru
 One test now feeds those events straight to the predicate. The patch moves because the harness
 grew and the shipped files did not.
 
-`0.4.3` is the half of that fix the harness was missing. The free-space condition is now
-checked before the first copy is made: under 64 MiB free, `mutate.py` prints `NO_MEDIDO` with
-the amount it found and returns `2`, instead of running 38 copies of a suite that will go red
-for the disk. Two tests pin it — one for a full filesystem, one for a `disk_usage` that cannot
-answer at all.
- the only place where `live_oracle` could still raise instead of answering. A
+`0.4.2` closes the only place where `live_oracle` could still raise instead of answering. A
 stress run of the suite under parallel load failed three times in 72 passes with
 `OSError: [Errno 28] No space left on device` — the machine's temp filesystem, at 121 MiB free,
 refused the two files `medir()` writes into its scratch box. `medir()` wrapped only the `node`
@@ -113,6 +108,24 @@ It now creates and writes the box inside the same contract as everything else: i
 `({}, "caja temporal no escribible: ...")`. One mutant (`lo_caja_llena`) restores the `raise`
 and one test kills it. The exit codes are unchanged; the patch moves because a return path was
 added.
+
+`0.4.3` is the half of that fix the harness was missing. The free-space condition is now
+checked before the first copy is made: under 64 MiB free, `mutate.py` prints `NO_MEDIDO` with
+the amount it found and returns `2`, instead of running 38 copies of a suite that will go red
+for the disk. Two tests pin it — one for a full filesystem, one for a `disk_usage` that cannot
+answer at all.
+
+`0.4.4` makes the exit code mean one thing. `1` says "the subject diverges", and it is also
+what a Python process returns when an exception escapes: a crash inside the instrument was being
+read as a verdict about the subject, and part of the evidence for it was a test that compared a
+traceback's `1` with an expected `1` and called the cell measured. Four escape routes were found
+by asking what happens to an input that *cannot* be measured rather than to a correct one — a
+profile too short for its bands, a reference with no names, a reference that is not an object,
+and a source that exports none of the names it was asked about. Each now answers `2` with a
+motive; the boundary that translates a crash (`_cli.correr`) is exercised by a test that
+provokes one; and the census refuses a run whose stderr carries a traceback in a row expecting
+`1`. The exit codes are unchanged for every input that was already contracted: the patch moves
+because return paths were added.
 
 ## `anchor_oracle`: exact arithmetic parity
 
@@ -310,8 +323,8 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `34` of `38` mutants killed; the other `4` cannot be reached by any input | 38 curated single-line mutations across seven sites (four modules, the CLI, two harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 38 mutations and names the four exemptions with their reason |
-| `13` of `16` exit-code cells measured; `3` empty, each with its motive | every CLI run once per cell, its exit code compared with the process's, no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
+| `40` of `44` mutants killed; the other `4` cannot be reached by any input | 44 curated single-line mutations across eight sites (four modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 44 mutations and names the four exemptions with their reason |
+| `15` of `18` contract rows measured; the other `3` declared with their motive | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, and no expectation taken from a flag's name | yes — `python3 tools/contrato_censo.py` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 
@@ -323,11 +336,11 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 38 mutations, 34 killed
+### What the tests would notice: 44 mutations, 40 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 38 one-line
-mutations are applied across seven sites (the four modules, the CLI, and the two harness
+open the fixture" but "if the code were wrong, would anything go red" — so 44 one-line
+mutations are applied across eight sites (the four modules, the CLI, and the three harness
 probes), each in a fresh copy, each followed by the whole suite.
 
 - **17 of 25 died** on the suite as it stood before the first pass of this section. Five of the
@@ -350,7 +363,14 @@ probes), each in a fresh copy, each followed by the whole suite.
   descriptor, and nothing under `sys.prefix` is opened. A rule no run can display is a rule no
   test holds, so `test_lo_que_abre_el_interprete_no_es_io_de_datos` now feeds the four events
   straight to the predicate, with a `.ts` write as the positive control.
-- **34 of 38 die now.** The four survivors are the declared ones in the table below, and the
+- **34 of 38 died** while the escape routes of `0.4.4` were still open, and the four
+  survivors were the declared ones in the table below.
+- **40 of 44 die now.** Four mutants were added over the routes that let a crash look like a
+  verdict, and all four die: one that removes the boundary's translation (`cli_choque_escapa`),
+  one that turns the translated crash back into `1` (`cli_choque_es_uno`), one that lets an
+  empty reference conform again (`ao_ref_vacia_ok`), one that lets the reader print nulls with `0`
+  (`lo_nulos_conforman`) — plus the short profile (`sp_perfil_escapa`) and the census's own
+  blind spot (`ce_choque_conforma`). The four survivors are the declared ones below, and the
   script reports `huecos de cobertura: ninguno` — zero undeclared holes — with exit code `0`.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
@@ -375,15 +395,23 @@ huecos de cobertura: sp_borde_izq, sp_bandas_guarda, ve_escala_eje1, ao_round_04
 
 — which is where the list above came from.
 
-**No kill in the final run depends on another site's tests** — and getting there was a fix to
-the verdict rule, not to the suite. The first version judged a kill by its *first* failing
-test, so four mutants whose own module's test also died were printed as `[ajeno]`: a label that
-reads as "nobody who owns this notices". The verdict now looks at the whole set of failing
-tests, and the report names the test that owns the mutant. The cost of the old rule is
-measurable: deleting `tests/test_contrato_censo.py` from a copy and re-running the two CLI
-mutants leaves both of them dead, killed by `tests.test_contrato_cli`. So the census adds no
-mutation coverage; what it buys is the sixteen-cell contract, which is a different claim, and
-the mutation rate was never evidence for it.
+**A kill is read from the whole set of failing tests, and `[ajeno]` still means what it
+says.** Getting that label right was a fix to the verdict rule, not to the suite. The
+first version judged a kill by its *first* failing test, so four mutants whose own
+module's test also died were printed as `[ajeno]`: a label that reads as "nobody who owns
+this notices". The verdict now looks at the whole set of failing tests, and the report
+names the test that owns the mutant. The cost of the old rule is measurable: deleting
+`tests/test_contrato_censo.py` from a copy and re-running the two CLI mutants leaves both
+of them dead, killed by `tests.test_contrato_cli`. So the census adds no mutation
+coverage; what it buys is the eighteen-row contract, which is a different claim, and the
+mutation rate was never evidence for it.
+
+Three kills in the run above are labelled `[ajeno]`, and this paragraph used to claim the
+opposite — that no kill depended on another site's tests. The run that closed the four escape
+routes falsified it: `sp_perfil_escapa`, `ao_ref_vacia_ok` and `lo_nulos_conforman` remove
+guards that only fire at the process boundary, where `tests/test_contrato_cli.py` owns the exit
+codes of all four modules. It is the right owner for that behaviour and the wrong word to print,
+so the number is stated here instead of being left for a reader to notice.
 
 Four rules make the report trustworthy. All four were learned by getting them wrong.
 
@@ -511,6 +539,14 @@ The three empty cells, with the code they do return:
   divergence: with no reference to be wrong about, the honest answer is `NO_MEDIDO`.
 - **`viewport_embed` + `2` → `20`.** It opens no file, so a missing input is arity, not
   `INSUMO_FALTA`.
+
+Two cells carry a second row, because one cell is reached by two unrelated inputs:
+`anchor_oracle` + `2` is `INSUMO_FALTA` for a file that is missing and `REFERENCIA_VACIA` for a
+file that names nothing, and `subpixel_probe` + `2` is the same missing file and a profile too
+short for its bands. A row also has to answer the *code*, not the status: `1` is both "the
+subject diverges" and what an escaping exception returns, so a row expecting `1` used to accept a
+traceback as its evidence. The census now reads `stderr` too, and a second negative control
+proves that refusal can go red.
 
 Two things this instrument got wrong before it got the table right, both worth stating
 because they are the failure it exists to catch:

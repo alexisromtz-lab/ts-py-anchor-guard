@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ts-py-anchor-guard"
-version = "0.4.3"
+version = "0.4.4"
 description = "Cross-language anchor verifier and 1:1 viewport / subpixel guards for TypeScript-to-Python ports"
 readme = "README.md"
 requires-python = ">=3.11"

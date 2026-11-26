@@ -211,7 +211,12 @@ def main(argv: list[str] | None = None) -> int:
         return no_medido("INSUMO_FALTA", str(exc))
     except ValueError as exc:
         return no_medido("INSUMO_ILEGIBLE", f"un perfil no es una lista de flotantes: {exc}")
-    recibo = anisotropia(a, b, bandas=args.bandas, max_shift=args.max_shift)
+    try:
+        recibo = anisotropia(a, b, bandas=args.bandas, max_shift=args.max_shift)
+    except PerfilInvalido as exc:
+        # Raised for a profile too short to divide into bands. Nothing was measured, so the
+        # answer is a gap; uncaught it exits `1`, the code that says "the port diverges".
+        return no_medido("PERFIL_INVALIDO", str(exc))
     if recibo["rc"] == RC_OK:
         fase = fase_subpixel(a, b, max_shift=args.max_shift)
         recibo["desplazamiento_global"] = fase["desplazamiento"]
@@ -227,4 +232,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from ._cli import correr
+
+    raise SystemExit(correr(main))

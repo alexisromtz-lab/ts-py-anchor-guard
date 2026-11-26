@@ -192,13 +192,33 @@ def main(argv: list[str] | None = None) -> int:
         return no_medido("INSUMO_FALTA", str(exc))
     except json.JSONDecodeError as exc:
         return no_medido("INSUMO_ILEGIBLE", f"referencia {args.referencia!r}: {exc}")
+    if not isinstance(referencia, dict):
+        return no_medido("INSUMO_ILEGIBLE",
+                         f"la referencia no es un objeto {{nombre: valor}}: "
+                         f"{type(referencia).__name__}")
+    if not referencia:
+        # Nothing named, nothing measured: `{}` is printed as a measurement by a reader,
+        # and an empty measurement is not a success.
+        return no_medido("REFERENCIA_VACIA",
+                         "la referencia no nombra ninguna ancla: no hay nada que medir")
     vivos, motivo = medir(fuente, referencia)
     if motivo:
         print(f"NO_MEDIDO · {motivo}", file=sys.stderr)
         return 2
+    # The probe answers one key per *named* anchor even when the source exports none: a
+    # non-numeric value is flattened to `None` on the way back. So `{}` is not the symptom;
+    # a dict of nulls printed with exit code 0 is a measurement of nothing read as success.
+    if not any(v is not None for valores in vivos.values() for v in valores):
+        # The name may be missing from the source, or present and returning a string: `medir`
+        # flattens both to `None`, so the receipt names both causes instead of picking one.
+        return no_medido("SIN_ANCLAS_LEGIBLES",
+                         f"{len(vivos)} anclas nombradas, ninguna evaluo a un numero: la fuente "
+                         "no exporta esos nombres, o los exporta con un valor no numerico")
     print(json.dumps(vivos, indent=2, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from ._cli import correr
+
+    raise SystemExit(correr(main))

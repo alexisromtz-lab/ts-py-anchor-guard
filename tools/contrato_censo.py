@@ -40,13 +40,22 @@ def _hay_nodo(raiz: Path) -> bool:
 
 
 def casos(raiz: Path, caja: Path) -> list[dict]:
-    """One row per code and module. `esperado` is what the process returns, not an ideal."""
+    """At least one row per code and module. `esperado` is what the process returns, not an ideal.
+
+    Two codes carry more than one row because the same code can be reached by two different
+    routes, and only one of them is a measurement: `2` from a missing file and `2` from a
+    profile too short to band are both gaps, and `1` from a divergence and `1` from a crash
+    are not the same verdict. `evaluar` rejects the crash outright.
+    """
     (caja / "malo.json").write_text(json.dumps({"CANVAS_W": 999.0}))
+    (caja / "vacia.json").write_text("{}")
+    (caja / "vacio.txt").write_text("")
     (caja / "a.txt").write_text(_perfil(raiz, 600, fase=0.25))
     (caja / "b.txt").write_text(_perfil(raiz, 600, semillas=(0.037, 0.101, 0.229)))
     ref = str(raiz / "fixtures" / "anchors.json")
     eng = str(raiz / "fixtures" / "engine.ts")
     malo, a, b, falta = str(caja / "malo.json"), str(caja / "a.txt"), str(caja / "b.txt"), "/no-existe"
+    vacia, vacio = str(caja / "vacia.json"), str(caja / "vacio.txt")
     nodo = _hay_nodo(raiz)
     # Sin node, el lector no puede medir y lo dice: la celda vacia es NO_MEDIDO, no un 0.
     lo_ok, lo_clase, lo_motivo = ((RC_OK, MEDIDO, "") if nodo else
@@ -62,6 +71,8 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
         ("anchor_oracle", RC_DIVERGE, ("--fuente", eng, "--referencia", malo), RC_DIVERGE, MEDIDO, ""),
         ("anchor_oracle", RC_NO_MEDIDO, ("--fuente", falta + ".ts", "--referencia", ref),
          RC_NO_MEDIDO, MEDIDO, ""),
+        ("anchor_oracle", RC_NO_MEDIDO, ("--fuente", eng, "--referencia", vacia),
+         RC_NO_MEDIDO, MEDIDO, "una referencia sin nombres no conforma nada"),
         ("anchor_oracle", RC_ARITY, ("--inexistente",), RC_ARITY, MEDIDO, ""),
 
         ("live_oracle", RC_OK, ("--fuente", eng, "--referencia", ref), lo_ok, lo_clase, lo_motivo),
@@ -75,6 +86,8 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
         ("subpixel_probe", RC_DIVERGE, ("--a", a, "--b", b), RC_NO_MEDIDO, POR_DISENO,
          "mide una fase; dos perfiles sin relacion no son una divergencia, son NO_MEDIDO"),
         ("subpixel_probe", RC_NO_MEDIDO, ("--a", falta + ".txt", "--b", b), RC_NO_MEDIDO, MEDIDO, ""),
+        ("subpixel_probe", RC_NO_MEDIDO, ("--a", vacio, "--b", vacio), RC_NO_MEDIDO, MEDIDO,
+         "un perfil vacio no se divide en bandas: NO_MEDIDO, no el 1 de un choque"),
         ("subpixel_probe", RC_ARITY, ("--inexistente",), RC_ARITY, MEDIDO, ""),
 
         ("viewport_embed", RC_OK, ("--canvas", "1080", "1920", "--ventana", "864", "960"),
@@ -95,7 +108,10 @@ def evaluar(filas: list[dict], *, raiz: Path) -> tuple[list[dict], int]:
     for fila in filas:
         proc = subprocess.run(fila["orden"], cwd=raiz, capture_output=True, text=True)
         fila["obtenido"] = proc.returncode
-        fila["conforme"] = proc.returncode == fila["esperado"]
+        # `1` is both "diverges" and the exit Python gives an uncaught exception, so a crash
+        # satisfied a divergence cell by accident. A cell conforms only if it did not crash.
+        fila["choque"] = "Traceback (most recent call last)" in proc.stderr
+        fila["conforme"] = proc.returncode == fila["esperado"] and not fila["choque"]
         fallos += 0 if fila["conforme"] else 1
     return filas, (RC_OK if not fallos else RC_DIVERGE)
 
@@ -109,8 +125,10 @@ def _tabla(filas: list[dict]) -> str:
             extra = f"  ({f['motivo']})" if f["motivo"] else ""
             lineas.append(f"{f['modulo']:{ancho}s}  {f['codigo']:2d}  {marca}{extra}")
         else:
-            lineas.append(f"{f['modulo']:{ancho}s}  {f['codigo']:2d}  DIVERGE: devolvio "
-                          f"{f['obtenido']}, se esperaba {f['esperado']}")
+            causa = ("CHOQUE: revienta en vez de dar un veredicto"
+                     if f.get("choque") else
+                     f"devolvio {f['obtenido']}, se esperaba {f['esperado']}")
+            lineas.append(f"{f['modulo']:{ancho}s}  {f['codigo']:2d}  DIVERGE: {causa}")
     return "\n".join(lineas)
 
 
@@ -124,9 +142,17 @@ def _autotest(raiz: Path) -> int:
     if evaluar(falso, raiz=raiz)[1] != RC_DIVERGE:
         print("FALLO: el verificador acepto una expectativa imposible", file=sys.stderr)
         return RC_DIVERGE
+    # El segundo control: `1` es la divergencia y tambien la salida de una excepcion. Un
+    # proceso que revienta no puede satisfacer una celda que espera `1`.
+    choque = [{"modulo": "control", "codigo": RC_DIVERGE, "esperado": RC_DIVERGE,
+               "clase": MEDIDO, "motivo": "", "args": [],
+               "orden": [sys.executable, "-c", "raise RuntimeError('boom')"]}]
+    if evaluar(choque, raiz=raiz)[1] != RC_DIVERGE:
+        print("FALLO: un choque satisfizo una celda de divergencia", file=sys.stderr)
+        return RC_DIVERGE
     with tempfile.TemporaryDirectory(prefix="censo-") as caja:
         celdas = len(casos(raiz, Path(caja)))
-    print(f"AUTOTEST OK: {celdas} celdas de contrato")
+    print(f"AUTOTEST OK: {celdas} celdas de contrato · 2 controles negativos")
     return RC_OK
 
 
@@ -154,4 +180,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if str(Path(__file__).resolve().parent.parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from ts_py_anchor_guard._cli import correr
+
+    raise SystemExit(correr(main))

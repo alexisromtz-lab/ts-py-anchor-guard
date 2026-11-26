@@ -2,8 +2,8 @@
 
 The README publishes four exit codes; this is the reader that keeps the table true. Two
 things are pinned and they are not the same: that the census agrees with the processes
-(twelve measured cells), and that the census *can* disagree — a verifier whose negative
-control never fires is a green that measures nothing.
+(one row per code and module), and that the census *can* disagree -- a verifier whose
+negative control never fires is a green that measures nothing.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,16 @@ class ContratoCenso(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             rc = censo.main(["--raiz", str(RAIZ), "--self-test"])
         self.assertEqual(rc, 0)
+
+    def test_un_choque_no_satisface_una_celda_de_divergencia(self):
+        """`1` is a verdict and `1` is also a crash; the cell must tell them apart."""
+        fila = {"modulo": "control", "codigo": 1, "esperado": 1, "clase": "", "motivo": "",
+                "args": [], "orden": [sys.executable, "-c", "raise RuntimeError('boom')"]}
+        filas, rc = censo.evaluar([fila], raiz=RAIZ)
+        self.assertEqual(filas[0]["obtenido"], 1)
+        self.assertTrue(filas[0]["choque"])
+        self.assertFalse(filas[0]["conforme"], "un choque paso por divergencia medida")
+        self.assertEqual(rc, 1)
 
     def test_las_celdas_vacias_se_declaran_con_su_motivo(self):
         from ts_py_anchor_guard.live_oracle import version_de_nodo

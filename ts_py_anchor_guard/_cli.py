@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Callable
 
 from . import RC_ARITY, RC_NO_MEDIDO
 
@@ -47,3 +48,21 @@ def no_medido(causa: str, detalle: str) -> int:
     """Print the not-measured receipt line and return its code."""
     print(f"NO_MEDIDO · {causa} · {detalle}", file=sys.stderr)
     return RC_NO_MEDIDO
+
+
+def correr(principal: Callable[[list[str] | None], int],
+           argv: list[str] | None = None) -> int:
+    """Run `principal` at the process boundary, turning a crash into a gap.
+
+    `1` tells a runner "the subject diverges", and it is also what Python returns when an
+    exception escapes: a crash inside the instrument would be read as a verdict about the
+    subject. So the boundary answers `2` and names the failure, while `principal` itself
+    keeps raising -- a test still sees the defect instead of a polite receipt.
+    """
+    try:
+        return principal(argv)
+    except SystemExit:
+        raise
+    except Exception as fallo:  # noqa: BLE001 - the boundary is where a last net belongs
+        print(f"NO_MEDIDO · FALLA_INTERNA · {type(fallo).__name__}: {fallo}", file=sys.stderr)
+        return RC_NO_MEDIDO

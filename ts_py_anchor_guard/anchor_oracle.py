@@ -551,6 +551,18 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     against a second implementation of the same formula can agree for the wrong reason.
     The receipt names the `backend` that produced the numbers.
     """
+    if not isinstance(referencia, dict):
+        return {"rc": RC_NO_MEDIDO, "causa": "INSUMO_ILEGIBLE",
+                "detalle": f"la referencia no es un objeto {{nombre: valor}}, "
+                           f"es {type(referencia).__name__}", "anclas": [],
+                "no_evaluables": [], "backend": backend}
+    # The source side already refuses to conform when it declares no anchors; the reference
+    # side did not, so `{}` compared nothing and came back `RC_OK` -- a green that measured
+    # zero anchors. Two sides of one comparison take the same guard.
+    if not referencia:
+        return {"rc": RC_NO_MEDIDO, "causa": "REFERENCIA_VACIA",
+                "detalle": "la referencia no nombra ninguna ancla: no hay nada que comparar",
+                "anclas": [], "no_evaluables": [], "backend": backend}
     if anclas is None:
         if not texto:
             return {"rc": RC_NO_MEDIDO, "causa": "SIN_FUENTE",
@@ -817,4 +829,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from ._cli import correr
+
+    raise SystemExit(correr(main))
