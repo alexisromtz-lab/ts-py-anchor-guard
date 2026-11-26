@@ -201,8 +201,11 @@ files — on node `v24.15.0`, Python 3.12.13:
 | `check=probe` with 2 bands | `2` | `NO_MEDIDO · PERFIL_INVALIDO · hacen falta al menos 3 bandas` |
 
 The `action` job in `ci.yml` then takes over: four steps with `uses: ./` — three self-tests and
-the fixtures — plus one step asserting `steps.oraculo.outputs.rc == 0`, so the output cannot rot
-while the step stays green. Run `45841827322` on `0116b8f`
+the fixtures — one step asserting `steps.oraculo.outputs.rc == 0`, and a negative control that
+generates a `reference` displaced by one unit, runs the action on it with
+`continue-on-error: true`, and asserts that the step **failed**, that `rc` is `1`, and that the
+`receipt` carries `DIVERGE`. A job that only proves the happy path proves the step runs, not
+that it judges. Run `45841827322` on `0116b8f`
 ([link](https://github.com/alexisromtz-lab/ts-py-anchor-guard/actions/runs/45841827322)) finished
 with `action: success` and the three interpreter jobs green, which is what turns the seven rows
 above from a local measurement into a measurement of the action.

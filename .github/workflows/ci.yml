@@ -71,3 +71,29 @@ jobs:
         run: |
           echo "rc declarado: ${{ steps.oraculo.outputs.rc }}"
           test "${{ steps.oraculo.outputs.rc }}" = "0"
+      - name: un reference desplazado, generado aqui
+        run: |
+          python - <<'PY'
+          import json
+          d = json.load(open("fixtures/anchors.json"))
+          d["PLATE_W"] = d["PLATE_W"] + 1.0
+          json.dump(d, open("desplazado.json", "w"))
+          PY
+      - name: la action tiene que fallar con rc 1
+        id: desvio
+        continue-on-error: true
+        uses: ./
+        with:
+          check: anchor
+          source: fixtures/engine.ts
+          reference: desplazado.json
+      - name: el fallo se ve como fallo, no como verde
+        env:
+          RC: ${{ steps.desvio.outputs.rc }}
+          RECIBO: ${{ steps.desvio.outputs.receipt }}
+          RESULTADO: ${{ steps.desvio.outcome }}
+        run: |
+          # A job that only proves the happy path proves the step runs, not that it judges.
+          test "$RESULTADO" = "failure"
+          test "$RC" = "1"
+          printf '%s' "$RECIBO" | grep -q DIVERGE
