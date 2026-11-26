@@ -200,9 +200,12 @@ files — on node `v24.15.0`, Python 3.12.13:
 | `check` misspelled | `20` | names the three accepted values |
 | `check=probe` with 2 bands | `2` | `NO_MEDIDO · PERFIL_INVALIDO · hacen falta al menos 3 bandas` |
 
-What is *not* measured here: the action has not yet run inside GitHub's own runner. The `action`
-job in `ci.yml` does that with `uses: ./` on every push, and until a green run exists, the table
-above is a local measurement of the same script, not of the action.
+The `action` job in `ci.yml` then takes over: four steps with `uses: ./` — three self-tests and
+the fixtures — plus one step asserting `steps.oraculo.outputs.rc == 0`, so the output cannot rot
+while the step stays green. Run `45841827322` on `0116b8f`
+([link](https://github.com/alexisromtz-lab/ts-py-anchor-guard/actions/runs/45841827322)) finished
+with `action: success` and the three interpreter jobs green, which is what turns the seven rows
+above from a local measurement into a measurement of the action.
 
 There is no `v0` tag yet. Pin the commit sha until one is cut.
 
