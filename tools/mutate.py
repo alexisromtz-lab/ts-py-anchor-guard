@@ -165,6 +165,10 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      "        (\"subpixel_probe\", RC_DIVERGE, (\"--a\", a, \"--b\", b), RC_NO_MEDIDO, POR_DISENO,",
      "        (\"subpixel_probe\", RC_DIVERGE, (\"--a\", a, \"--b\", b), RC_OK, POR_DISENO,",
      "la celda que se declara vacia en vez de medida"),
+    ("lo_caja_llena", "ts_py_anchor_guard/live_oracle.py",
+     "        except OSError as fallo:\n            return {}, f\"caja temporal no escribible: {fallo}\"\n        orden =",
+     "        except OSError as fallo:\n            raise\n        orden =",
+     "el disco lleno vuelve a salir como excepcion"),
 )
 
 # El modulo de prueba que le corresponde a cada fuente, indexado por la ruta de la fuente.

@@ -52,6 +52,11 @@ appear here. The fixtures are synthetic on purpose.
   clean run, because the child runs with `-B`. Nothing was watching them, and two mutants that
   removed them survived: a guard the suite cannot exercise is a guard the suite does not have.
   Feed the predicate the events a real run would produce, with a data write as the control.
+- **A resource the machine cannot give is a motive, not an exception.** `medir()` wrapped only
+  the `node` call, so a temp filesystem out of space escaped as `OSError` and read as a failure
+  of the package — three times in 72 stress passes. Every state the package cannot measure
+  leaves through `({}, motivo)`; a `try` that covers the external process but not the scratch
+  writes around it covers the wrong half.
 
 ## Style
 

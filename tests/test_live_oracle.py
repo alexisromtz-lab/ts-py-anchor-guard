@@ -46,6 +46,14 @@ class OraculoVivoTest(unittest.TestCase):
         self.assertEqual(vivos, {})
         self.assertIn("node rc", motivo)
 
+    def test_una_caja_temporal_llena_es_un_motivo_y_no_una_excepcion(self):
+        with mock.patch.object(pathlib.Path, "write_text",
+                               side_effect=OSError(28, "No space left on device")):
+            vivos, motivo = live_oracle.medir(_MINIMA, {"A": 864}, nodo=("/bin/false", []))
+        self.assertEqual(vivos, {})
+        self.assertIn("caja temporal no escribible", motivo)
+        self.assertIn("28", motivo)
+
 
 class BackendDeclaradoTest(unittest.TestCase):
     def test_el_recibo_nombra_el_backend_que_midio(self):

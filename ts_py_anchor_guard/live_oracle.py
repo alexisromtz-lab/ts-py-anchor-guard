@@ -95,11 +95,20 @@ def medir(fuente: str, referencia: dict, *, nodo: tuple[str, list[str]] | None =
     if elegido is None:
         return {}, "node >= 22.6 no esta disponible para ejecutar la fuente"
     ruta, flags = elegido
-    with tempfile.TemporaryDirectory(prefix="oraculo-vivo-") as caja:
+    # A temp filesystem that refuses the copy is a state of the environment, not a failure of
+    # the package: it leaves through a motive like every other NO_MEDIDO, never as an exception.
+    try:
+        caja_cruda = tempfile.TemporaryDirectory(prefix="oraculo-vivo-")
+    except OSError as fallo:
+        return {}, f"caja temporal no escribible: {fallo}"
+    with caja_cruda as caja:
         caja = Path(caja)
-        # The extension has to stay `.ts`: that is the signal node uses to strip types.
-        (caja / "fuente.ts").write_text(fuente)
-        (caja / "probe.mjs").write_text(_PROBE)
+        try:
+            # The extension has to stay `.ts`: that is the signal node uses to strip types.
+            (caja / "fuente.ts").write_text(fuente)
+            (caja / "probe.mjs").write_text(_PROBE)
+        except OSError as fallo:
+            return {}, f"caja temporal no escribible: {fallo}"
         orden = [ruta, *flags, str(caja / "probe.mjs"), json.dumps(referencia)]
         try:
             corrida = subprocess.run(orden, capture_output=True, text=True, timeout=120,
