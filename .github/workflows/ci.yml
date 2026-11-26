@@ -269,6 +269,7 @@ jobs:
           RC_DERIVA: ${{ steps.manifiesto_deriva.outputs.rc }}
           RES_ARITMETICA: ${{ steps.manifiesto_aritmetica.outcome }}
           RC_ARITMETICA: ${{ steps.manifiesto_aritmetica.outputs.rc }}
+          REC_ARITMETICA: ${{ steps.manifiesto_aritmetica.outputs.receipt }}
         run: |
           test "$RC_MANIFIESTO" = "0"
           grep -q '^rc=0$' manifiesto.txt
@@ -297,5 +298,9 @@ jobs:
           grep -q NUDOS_S5.1 manifiesto_deriva.txt
 
           # Two ways to name the same pair is one way too many, and the wrong one is refused.
+          # The refusal happens before the module runs, so the code is published and the receipt
+          # is empty: it is a statement about the call, not a measurement. Run 45895456729 is
+          # what this row cost — the slot was empty then, and an empty slot is not a zero.
           test "$RES_ARITMETICA" = "failure"
           test "$RC_ARITMETICA" = "20"
+          test -z "$REC_ARITMETICA"

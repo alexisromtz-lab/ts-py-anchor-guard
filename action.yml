@@ -110,14 +110,23 @@ runs:
         # captures a divergence killed the script before it could write its outputs or its file.
         set +e -u -o pipefail
 
+        # A refusal at the boundary is a verdict too, and it leaves by the same door as the
+        # module's own exit 20: the caller reads `rc=20`, never an empty slot. Measured on run
+        # 45895456729 — a CI assertion on a refused invocation found the slot empty, because
+        # this script published `rc` only after the module had run. `outcome: failure` says the
+        # step did not conform; `rc` says what the call itself was worth.
+        rechazar() {
+          printf 'rc=20\nreceipt=\n' >> "${GITHUB_OUTPUT:-/dev/null}"
+          printf '::error title=ts-py-anchor-guard::%s\n' "$1"
+          exit 20
+        }
+
         case "$ENTRADA_CHECK" in
           anchor) modulo=anchor_oracle ;;
           embed)  modulo=viewport_embed ;;
           probe)  modulo=subpixel_probe ;;
           *)
-            echo "::error title=ts-py-anchor-guard::check desconocido" \
-              "'$ENTRADA_CHECK' (anchor|embed|probe)"
-            exit 20
+            rechazar "check desconocido '$ENTRADA_CHECK' (anchor|embed|probe)"
             ;;
         esac
 
@@ -133,14 +142,12 @@ runs:
                 # A manifest carries its own source, reference and mappings per pair: asking
                 # for `source` here would demand an argument the manifest already answers.
                 if [ -n "$ENTRADA_SOURCE" ] || [ -n "$ENTRADA_REFERENCE" ]; then
-                  echo "::error title=ts-py-anchor-guard::manifest excludes source and reference"
-                  exit 20
+                  rechazar "manifest excludes source and reference"
                 fi
                 args+=(--manifest "$ENTRADA_MANIFEST")
               else
                 if [ -z "$ENTRADA_SOURCE" ] || [ -z "$ENTRADA_REFERENCE" ]; then
-                  echo "::error title=ts-py-anchor-guard::check=anchor needs source and reference, or a manifest"
-                  exit 20
+                  rechazar "check=anchor needs source and reference, or a manifest"
                 fi
                 args+=(--fuente "$ENTRADA_SOURCE" --referencia "$ENTRADA_REFERENCE")
               fi
@@ -148,8 +155,7 @@ runs:
               ;;
             probe)
               if [ -z "$ENTRADA_PROFILE_A" ] || [ -z "$ENTRADA_PROFILE_B" ]; then
-                echo "::error title=ts-py-anchor-guard::check=probe needs profile-a and profile-b"
-                exit 20
+                rechazar "check=probe needs profile-a and profile-b"
               fi
               args+=(--a "$ENTRADA_PROFILE_A" --b "$ENTRADA_PROFILE_B")
               if [ -n "$ENTRADA_BANDS" ]; then args+=(--bandas "$ENTRADA_BANDS"); fi
@@ -157,8 +163,7 @@ runs:
               ;;
             embed)
               if [ -z "$ENTRADA_CANVAS" ] || [ -z "$ENTRADA_WINDOW" ]; then
-                echo "::error title=ts-py-anchor-guard::check=embed needs canvas and window"
-                exit 20
+                rechazar "check=embed needs canvas and window"
               fi
               read -r -a lona <<< "$ENTRADA_CANVAS"
               read -r -a ventana <<< "$ENTRADA_WINDOW"

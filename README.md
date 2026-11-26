@@ -204,6 +204,12 @@ one; and the pair's tolerance and backend had to be decided — the file wins, b
 be reviewed and a command line cannot. The minor moves because the schema is new; no exit code
 did.
 
+`21ae392` cut the tag's CI red and the reason was worth keeping: the assertion on a refused
+invocation found `steps.<id>.outputs.rc` empty. The module's own `20` was published; the action's
+own refusal was not, so the same code reached the caller as a number on one path and as an
+absent slot on the other. All boundary refusals now publish `rc=20` with an empty `receipt`, and
+`ci.yml` asserts both.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
@@ -240,8 +246,14 @@ and exits with the module's own code, so a divergence fails the step instead of 
 | `bands` | — | `probe` | band count, at least 3 and at least 32 samples each |
 | `max-shift` | — | `probe` | cap on the shift searched, in samples |
 
-Two outputs: `rc` (`0` · `1` · `2`, the same value the step exits with) and `receipt` (the whole
-JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
+Two outputs: `rc` (`0` · `1` · `2` · `20`, the same value the step exits with) and `receipt` (the
+whole JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
+
+A refusal at the boundary publishes the code and leaves `receipt` empty, because nothing was
+measured: run `45895456729` found that slot empty instead of reading `20`, since the script wrote
+its outputs only after the module had run. An empty output is not a zero, so the three inputs a
+call can get wrong now leave through the same door as the module's own `20`, and `outcome:
+failure` plus `rc` say which side refused and what it said.
 
 **`shell: bash` inside a composite action is `bash -e`.** That one fact cost three runs.
 
