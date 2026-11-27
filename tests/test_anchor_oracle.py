@@ -587,3 +587,148 @@ class TaxonomiaTest(unittest.TestCase):
         self.assertIn("NO_EVALUABLE T · PLANTILLA_LITERAL · ", texto)
         self.assertIn("NO_EVALUABLE U · EN_ENTORNO · ", texto)
         self.assertIn("1 por estructura (PLANTILLA_LITERAL 1)", texto)
+
+
+class EntornoDeclaradoTest(unittest.TestCase):
+    """A read of `process.env.X` is a function of a deployment, and the map is its argument.
+
+    Measured on `calcom/cal.com@ae027bb7`: without a map 38 of 118 anchors are priced and 60
+    depend on the environment. Declaring the 63 variables the file reads moves exactly 10 of
+    them -- 38 + 10 = 48 -- because the other 50 are stopped by a construct the map does not
+    reach: 31 boolean operators, 8 comparisons, 4 templates, 3 member accesses, 1 arrow, and
+    3 that have a second blocker behind the read (`as string`, `parseInt`, a ternary). The
+    prediction said 51; that arithmetic read `causa_de`, which publishes the head of a chain
+    and not the chain.
+    """
+
+    def _censo(self, fuente: str, entorno=None):
+        from ts_py_anchor_guard.anchor_oracle import censo
+        motivos: dict = {}
+        anclas = extraer_anclas(fuente, motivos=motivos)
+        return censo(anclas, motivos, entorno=entorno)
+
+    def test_una_lectura_desnuda_es_un_valor_cuando_el_mapa_la_declara(self):
+        recuento = self._censo('export const A = process.env.PORT;\n'
+                              'export const B = process.env.OTRA;\n',
+                              entorno={"PORT": "3000"})
+        self.assertEqual(recuento["evaluables"], 1)
+        self.assertEqual(recuento["con_entorno"], {"B": ["OTRA"]})
+        self.assertEqual(recuento["causa_de"]["B"], "VARIABLE_NO_DECLARADA")
+        self.assertIn("variable de entorno no declarada: OTRA", recuento["no_evaluables"]["B"])
+
+    def test_el_reparto_de_tres_poblaciones_cierra_con_mapa(self):
+        """Adding a map moves anchors between populations; it never invents or loses one."""
+        fuente = ('export const A = 1;\n'
+                  'export const B = process.env.PORT;\n'
+                  'export const C = process.env.FALTA;\n'
+                  'export const D = `${B}px`;\n')
+        sin = self._censo(fuente)
+        con = self._censo(fuente, entorno={"PORT": "3000"})
+        self.assertEqual(sin["evaluables"], con["evaluables"] - 1)
+        self.assertEqual(sin["estructurales"], con["estructurales"])
+        for recuento in (sin, con):
+            self.assertEqual(sum(recuento["por_causa"].values())
+                             + len(recuento["con_entorno"]), len(recuento["no_evaluables"]))
+        self.assertEqual(con["con_entorno"], {"C": ["FALTA"]})
+        self.assertEqual(con["causa_de"]["D"], "PLANTILLA_LITERAL")
+
+    def test_una_variable_ausente_nunca_toma_el_valor_por_defecto(self):
+        """`X || "d"` is refused at the operator, before the read: the map cannot reach it.
+
+        The map closes the environment; the fallback would need the operator act, and until
+        then the anchor stays a hole. What this pins is that it never becomes `"d"`.
+        """
+        recuento = self._censo('export const A = process.env.FALTA || "d";\n',
+                              entorno={"OTRA": "si"})
+        self.assertEqual(recuento["evaluables"], 0)
+        self.assertIn("A", recuento["con_entorno"])
+        self.assertEqual(recuento["causa_de"]["A"], "OPERADOR_BOOLEANO")
+        with self.assertRaises(FuenteIlegible):
+            evaluar(extraer_anclas('export const A = process.env.FALTA || "d";\n'),
+                    "A", entorno={"OTRA": "si"})
+
+    def test_el_mapa_no_resucita_lo_que_el_operador_detiene(self):
+        """The map closes the environment; what stands behind it is the next act's business."""
+        recuento = self._censo('export const A = process.env.PORT || "80";\n'
+                              'export const B = process.env.PORT ?? "80";\n',
+                              entorno={"PORT": "3000"})
+        self.assertEqual(recuento["causa_de"]["A"], "OPERADOR_BOOLEANO")
+        self.assertEqual(recuento["evaluables"], 1)
+        self.assertNotIn("B", recuento["no_evaluables"])
+        self.assertNotIn("B", recuento["con_entorno"])
+
+    def test_la_forma_corchete_y_la_forma_punto_son_la_misma_lectura(self):
+        recuento = self._censo('export const A = process.env["PORT"];\n'
+                              'export const B = process.env.PORT;\n'
+                              'export const C = import.meta.env["PORT"];\n',
+                              entorno={"PORT": "3000"})
+        self.assertEqual(recuento["evaluables"], 3)
+        sin_mapa = self._censo('export const A = process.env["PORT"];\n')
+        self.assertEqual(sin_mapa["con_entorno"], {"A": ["PORT"]})
+        self.assertEqual(sin_mapa["causa_de"]["A"], "VARIABLE_NO_DECLARADA")
+
+    def test_un_texto_que_nombra_una_variable_no_es_una_lectura(self):
+        """The literal is a value; only the syntax outside a string asks the deployment."""
+        recuento = self._censo('export const A = "process.env.PORT";\n')
+        self.assertEqual(recuento["evaluables"], 1)
+        self.assertEqual(recuento["con_entorno"], {})
+
+    def test_el_mapa_se_publica_porque_otro_mapa_es_otro_censo(self):
+        recuento = self._censo('export const A = process.env.PORT;\n',
+                              entorno={"PORT": "3000", "OTRA": "x"})
+        self.assertEqual(recuento["entorno"], {"OTRA": "x", "PORT": "3000"})
+        vacio = self._censo('export const A = 1;\n')
+        self.assertEqual(vacio["entorno"], {})
+
+    def test_un_mapa_ilegible_es_no_medido_y_jamas_un_mapa_vacio(self):
+        from ts_py_anchor_guard.anchor_oracle import _mapa_declarado
+        self.assertEqual(_mapa_declarado("{", "m.json")[0], None)
+        self.assertEqual(_mapa_declarado("[1]", "m.json")[1][0], "MAPA_ENTORNO_ILEGIBLE")
+        mapa, fallo = _mapa_declarado('{"PORT": 3000}', "m.json")
+        self.assertIsNone(mapa)
+        self.assertEqual(fallo[0], "MAPA_ENTORNO_ILEGIBLE")
+        self.assertIn("PORT", fallo[1])
+        self.assertEqual(_mapa_declarado('{"PORT": "3000"}', "m.json")[0], {"PORT": "3000"})
+
+    def test_la_cli_carga_el_mapa_y_lo_publica(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = pathlib.Path(caja) / "env.ts"
+            fuente.write_text('export const A = process.env.PORT;\n'
+                              'export const B = process.env.FALTA;\n')
+            mapa = pathlib.Path(caja) / "env.json"
+            mapa.write_text('{"PORT": "3000"}')
+            with contextlib.redirect_stdout(io.StringIO()) as salida, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["--fuente", str(fuente), "--censo", "--entorno", str(mapa)])
+            self.assertEqual(rc, RC_OK)
+            texto = salida.getvalue()
+            self.assertIn("CENSO · 1 variable(s) declarada(s) · 2 declarada(s) · ", texto)
+            mapa.write_text('{"PORT": 3000}')
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as error:
+                rc = main(["--fuente", str(fuente), "--censo", "--entorno", str(mapa)])
+            self.assertEqual(rc, RC_NO_MEDIDO)
+            self.assertIn("MAPA_ENTORNO_ILEGIBLE", error.getvalue())
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as error:
+                rc = main(["--fuente", str(fuente), "--censo",
+                           "--entorno", str(pathlib.Path(caja) / "no-existe.json")])
+            self.assertEqual(rc, RC_NO_MEDIDO)
+            self.assertIn("INSUMO_FALTA", error.getvalue())
+
+    def test_el_manifiesto_no_traga_el_mapa_en_silencio(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            mapa = pathlib.Path(caja) / "env.json"
+            mapa.write_text('{"PORT": "3000"}')
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as error:
+                rc = main(["--manifest", str(pathlib.Path(caja) / "m.json"),
+                           "--entorno", str(mapa)])
+        self.assertEqual(rc, RC_ARITY)
+        self.assertIn("todavia no viaja en el manifiesto", error.getvalue())

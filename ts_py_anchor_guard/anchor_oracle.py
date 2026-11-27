@@ -407,6 +407,12 @@ def extraer_anclas(texto: str, motivos: dict[str, str] | None = None) -> dict[st
 _ENTORNO = re.compile(r"\b(?:process\.env|import\.meta\.env)"
                       r"(?:\.([A-Za-z_$][\w$]*)|\s*\[\s*[\"']([^\"']+)[\"']\s*\])")
 
+# The whole token, not a search: the tokenizer keeps `a.b.c` as one name, so the only place a
+# declared environment can stand in for a read is where that name is born. Both forms the census
+# already counts are here: the dot form is one token, the bracket form is a name plus an index.
+_ENTORNO_DESNUDO = re.compile(r"^(?:process\.env|import\.meta\.env)\.([A-Za-z_$][\w$]*)$")
+_ENTORNO_RAIZ = frozenset({"process.env", "import.meta.env"})
+
 
 def _lee_entorno(cuerpo: str) -> list[str]:
     """Environment variables a body reads -- text and comments that name them do not count.
@@ -422,7 +428,8 @@ def _lee_entorno(cuerpo: str) -> list[str]:
                    for a, b in [m.groups()]})
 
 
-def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
+def censo(anclas: dict[str, dict], motivos: dict[str, str],
+          entorno: dict[str, str] | None = None) -> dict:
     """How much of a source the reader covers, and what it says about the rest.
 
     Three different numbers, and none is a green: `leidas` is what the reader returned at
@@ -435,12 +442,18 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
     `por_causa` names every structural refusal by the construct that stopped the reader, and
     it covers the whole remainder with `con_entorno`: `suma(por_causa) + len(con_entorno)`
     equals the refusals, so no anchor is silent about why it has no value.
+
+    `entorno` is the declared map `{VARIABLE: "valor"}` and it is published back, because a
+    census that priced a source under an environment has to say which environment: the same
+    commit under another map is another census. A refusal it cannot lift stays in
+    `con_entorno` and `causa_de` now names the *next* thing that stopped it, which is how the
+    map's own yield is explained instead of asserted.
     """
     evaluables, fallos, cache, con_entorno, causas = [], {}, {}, {}, {}
     for nombre, ancla in anclas.items():
         try:
             if ancla["tipo"] == "const":
-                evaluar(anclas, nombre, cache=cache)
+                evaluar(anclas, nombre, cache=cache, entorno=entorno)
             else:
                 _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
         except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
@@ -462,11 +475,35 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
             "evaluables": len(evaluables),
             "cobertura": round(len(anclas) / declaradas, 4) if declaradas else None,
             "con_entorno": dict(sorted(con_entorno.items())),
+            "entorno": dict(sorted(entorno.items())) if entorno else {},
             "estructurales": len(fallos) - len(con_entorno),
             "por_causa": dict(sorted(por_causa.items())),
             "causa_de": dict(sorted(causas.items())),
             "no_leidas": dict(sorted(motivos.items())),
             "no_evaluables": dict(sorted(fallos.items()))}
+
+
+def _mapa_declarado(texto: str, origen: str):
+    """`{VARIABLE: "valor"}` or the reason it is not one. `process.env` yields text.
+
+    Refusing a number is not pedantry: coercing `25` to `"25"` would let a map describe a type
+    the deployment cannot have, and the first anchor that compares text against it would agree
+    for the wrong reason. A map that cannot be read is `NO_MEDIDO`, never an empty map -- an
+    empty map looks exactly like "the source reads nothing" and would silence every read.
+    """
+    try:
+        crudo = json.loads(texto)
+    except json.JSONDecodeError as exc:
+        return None, ("MAPA_ENTORNO_ILEGIBLE", f"{origen!r}: {exc}")
+    if not isinstance(crudo, dict):
+        return None, ("MAPA_ENTORNO_ILEGIBLE",
+                      f"{origen!r} no es un objeto {{VARIABLE: valor}}: "
+                      f"es {type(crudo).__name__}")
+    malos = sorted(str(k) for k, v in crudo.items() if not isinstance(v, str))
+    if malos:
+        return None, ("MAPA_ENTORNO_ILEGIBLE",
+                      f"{origen!r}: {', '.join(malos)} no da(n) texto, y process.env da texto")
+    return {str(k): v for k, v in crudo.items()}, None
 
 
 # ------------------------------------------------------------------ evaluacion
@@ -626,8 +663,26 @@ def _tokenizar(expr: str) -> list[tuple[str, object]]:
 class _Evaluador:
     """Recursive descent over the arithmetic subset: literals, names, `+ - * / **`, calls."""
 
-    def __init__(self, tokens: list[tuple[str, object]], entorno: dict[str, float]):
+    def __init__(self, tokens: list[tuple[str, object]], entorno: dict[str, float],
+                 mapa: dict[str, str] | None = None):
         self.tokens, self.i, self.entorno = tokens, 0, entorno
+        self.mapa = mapa
+
+    def _valor_entorno(self, variable: str, escrito: str):
+        """The declared value of one environment variable, or a refusal that names the gap.
+
+        A variable the map does not declare is not defaulted: `X || 3` with `X` absent is a
+        silent fallback dressed as a value, and the census would publish it as a measurement of
+        the source. The refusal still carries the whole token when no map was given at all, so
+        a caller who did not opt into this has the message it always had.
+        """
+        if self.mapa is None:
+            raise FuenteIlegible(f"nombre no declarado: {escrito}",
+                                 causa="VARIABLE_NO_DECLARADA")
+        if variable not in self.mapa:
+            raise FuenteIlegible(f"variable de entorno no declarada: {variable}",
+                                 causa="VARIABLE_NO_DECLARADA")
+        return self.mapa[variable]
 
     def _mirar(self):
         return self.tokens[self.i] if self.i < len(self.tokens) else (None, None)
@@ -643,7 +698,11 @@ class _Evaluador:
     def evaluar(self):
         valor = self._expresion()
         if self.i != len(self.tokens):
-            raise FuenteIlegible(f"sobra {self.tokens[self.i:]}")
+            # What is left over names the construct that stopped the reader, the same way a
+            # symbol does: `as string` is an assertion and `?` is a ternary, and reporting both
+            # as "a rule of the evaluator" would hide the construct behind the fallback.
+            raise FuenteIlegible(f"sobra {self.tokens[self.i:]}",
+                                 causa=_causa_del_token(self.tokens[self.i]))
         return valor
 
     def _expresion(self):
@@ -765,8 +824,17 @@ class _Evaluador:
                         args.append(self._expresion())
                 self._tomar(")")
                 if valor not in _FUNCIONES:
-                    raise FuenteIlegible(f"funcion no soportada: {valor}")
+                    raise FuenteIlegible(f"funcion no soportada: {valor}",
+                                         causa="FUNCION_NO_SOPORTADA")
                 return _num(_FUNCIONES[valor](*[_num(a) for a in args]))
+            lectura = _ENTORNO_DESNUDO.match(valor)
+            if lectura:
+                return self._valor_entorno(lectura.group(1), valor)
+            if valor in _ENTORNO_RAIZ and self._mirar()[1] == "[":
+                self._tomar("[")
+                _, clave = self._tomar(tipo="cad")
+                self._tomar("]")
+                return self._valor_entorno(str(clave), f"{valor}[{clave!r}]")
             if valor in _CONSTANTES:
                 return float(_CONSTANTES[valor])
             if valor in self.entorno:
@@ -781,9 +849,10 @@ class _Entorno(dict):
     """Scope that resolves a constant on demand, memoised and cycle-checked."""
 
     def __init__(self, anclas: dict[str, dict], cache: dict[str, float],
-                 en_curso: set[str]):
+                 en_curso: set[str], mapa: dict[str, str] | None = None):
         super().__init__()
         self._anclas, self._cache, self._en_curso = anclas, cache, en_curso
+        self._mapa = mapa
 
     def __contains__(self, nombre) -> bool:
         if dict.__contains__(self, nombre):
@@ -794,7 +863,7 @@ class _Entorno(dict):
     def __getitem__(self, nombre):
         if dict.__contains__(self, nombre):
             return dict.__getitem__(self, nombre)
-        return _resolver(self._anclas, nombre, self._cache, self._en_curso)
+        return _resolver(self._anclas, nombre, self._cache, self._en_curso, self._mapa)
 
 
 def _miembro(valor, resto: str, completo: str):
@@ -809,7 +878,8 @@ def _miembro(valor, resto: str, completo: str):
     return valor
 
 
-def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[str]):
+def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[str],
+              mapa: dict[str, str] | None = None):
     if nombre in cache:
         return cache[nombre]
     base, _, resto = nombre.partition(".")
@@ -823,7 +893,7 @@ def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[s
     en_curso.add(base)
     try:
         valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
-                           _Entorno(anclas, cache, en_curso)).evaluar()
+                           _Entorno(anclas, cache, en_curso, mapa)).evaluar()
     except FuenteIlegible as fallo:
         # The position and the quoted text belong to the constant this one reads, not to it:
         # measured, `BASE_URL = WEBAPP_URL` reported `en 50` on a 10-character body. Naming the
@@ -835,7 +905,7 @@ def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[s
 
 
 def evaluar(anclas: dict[str, dict], nombre: str, puntos=None,
-            cache: dict | None = None):
+            cache: dict | None = None, entorno: dict[str, str] | None = None):
     """Evaluate one anchor. A function is evaluated at each of `puntos`.
 
     `nombre` may be a path (`CANVAS.ancho`, `rect.top`): the base is evaluated and the
@@ -843,18 +913,22 @@ def evaluar(anclas: dict[str, dict], nombre: str, puntos=None,
     field by field instead of being written off as opaque. A point of `None` means the
     call site passes no argument, which is the only honest way to reproduce a JS
     `param ?? fallback` default.
+
+    `entorno` is the declared environment, `{VARIABLE: "valor"}`: a read of `process.env.X`
+    becomes the text declared for `X` and nothing else. Without it the read is a gap, because
+    the value of a deployment is not in the source.
     """
     base, _, resto = nombre.partition(".")
     if base not in anclas:
         raise AnclaDesconocida(nombre)
     ancla = anclas[base]
     cache = {} if cache is None else cache
-    constantes = _Entorno(anclas, cache, set())
+    constantes = _Entorno(anclas, cache, set(), entorno)
     if ancla["tipo"] == "const":
         if puntos:
             raise FuenteIlegible(f"{nombre} es una constante, no se evalua en puntos")
         valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
-                           constantes).evaluar()
+                           constantes, entorno).evaluar()
         return valor if not resto else _miembro(valor, resto, nombre)
     if not puntos:
         puntos = [0.0]
@@ -864,9 +938,9 @@ def evaluar(anclas: dict[str, dict], nombre: str, puntos=None,
     salida = []
     tokens = _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
     for u in puntos:
-        entorno = _Entorno(anclas, cache, set())
-        entorno[ancla["params"][0]] = None if u is None else float(u)
-        valor = _Evaluador(tokens, entorno).evaluar()
+        alcance = _Entorno(anclas, cache, set(), entorno)
+        alcance[ancla["params"][0]] = None if u is None else float(u)
+        valor = _Evaluador(tokens, alcance, entorno).evaluar()
         salida.append(valor if not resto else _miembro(valor, resto, nombre))
     return salida
 
@@ -886,7 +960,8 @@ def residuo_de_redondeo(valor: float) -> dict:
 
 def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
              anclas: dict[str, dict] | None = None, vivos: dict | None = None,
-             backend: str = "estatico", exigir_cobertura_total: bool = False) -> dict:
+             backend: str = "estatico", exigir_cobertura_total: bool = False,
+             entorno: dict[str, str] | None = None) -> dict:
     """Compare every anchor the reference names against the value it expects.
 
     `referencia` is `{nombre: valor}` for constants or
@@ -909,6 +984,10 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
     repository that signs a manifest saying every anchor it declares is accounted for gets
     `RC 2 · COBERTURA_INCOMPLETA` when one is not, and `cobertura.exigida` says in the
     receipt which of the two readings applies.
+
+    `entorno` is the declared environment the source reads, and the receipt publishes it:
+    two receipts of the same commit under two maps are a differential measurement, and one
+    that did not say which map it used would be two half-receipts.
     """
     if not isinstance(referencia, dict):
         return {"rc": RC_NO_MEDIDO, "causa": "INSUMO_ILEGIBLE",
@@ -933,6 +1012,7 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
                 "detalle": "la fuente no declara ninguna ancla evaluable", "anclas": [],
                 "no_evaluables": [], "backend": backend}
     filas, divergen, no_medidas, no_evaluables, cache = [], 0, [], [], {}
+    mapa_json = dict(sorted(entorno.items())) if entorno else {}
     for nombre, esperado in referencia.items():
         if nombre.partition(".")[0] not in anclas:
             no_medidas.append(nombre)
@@ -961,7 +1041,7 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
             continue
         try:
             if vivos is None:
-                obtenidos = evaluar(anclas, nombre, puntos, cache)
+                obtenidos = evaluar(anclas, nombre, puntos, cache, entorno)
             else:
                 obtenidos = vivos[nombre]
                 if any(o is None for o in obtenidos) and not de_texto:
@@ -1032,7 +1112,8 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_DECLARADA",
                 "detalle": f"la fuente no declara {', '.join(sorted(no_medidas))}",
                 "anclas": filas, "no_evaluables": no_evaluables, "backend": backend,
-                "cobertura": cobertura}
+                "cobertura": cobertura,
+                "entorno": mapa_json}
     # A divergence is a measurement and outranks a gap; a gap never degrades to conforming.
     if divergen:
         de_texto = sorted(f["ancla"] for f in filas
@@ -1048,14 +1129,16 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
                 "detalle": " · ".join(trozos),
                 "tolerancia": tolerancia, "anclas": filas,
                 "no_evaluables": no_evaluables, "backend": backend,
-                "cobertura": cobertura}
+                "cobertura": cobertura,
+                "entorno": mapa_json}
     if no_evaluables:
         nombres = ", ".join(f["ancla"] for f in no_evaluables)
         return {"rc": RC_NO_MEDIDO, "causa": "ANCLA_NO_EVALUABLE",
                 "detalle": f"fuera del subconjunto legible: {nombres}",
                 "tolerancia": tolerancia, "anclas": filas,
                 "no_evaluables": no_evaluables, "backend": backend,
-                "cobertura": cobertura}
+                "cobertura": cobertura,
+                "entorno": mapa_json}
     # A subset is reported and allowed, because one invocation is allowed to measure one
     # question. A repository that signs a manifest saying otherwise gets a gap instead of a
     # green: an anchor nobody declared how to read is indistinguishable from an anchor that
@@ -1065,10 +1148,12 @@ def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
                 "detalle": f"la cobertura exigida omite {', '.join(cobertura['omitidas'])}",
                 "tolerancia": tolerancia, "anclas": filas,
                 "no_evaluables": no_evaluables, "backend": backend,
-                "cobertura": cobertura}
+                "cobertura": cobertura,
+                "entorno": mapa_json}
     return {"rc": RC_OK, "causa": "", "detalle": "", "tolerancia": tolerancia,
             "anclas": filas, "no_evaluables": [], "backend": backend,
-            "cobertura": cobertura}
+            "cobertura": cobertura,
+            "entorno": mapa_json}
 
 
 # --------------------------------------------------------------------- anclas
@@ -1272,6 +1357,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exigir-cobertura-total", dest="exigir_cobertura_total",
                         action="store_true",
                         help="un ancla declarada que nadie midio es un hueco, no un verde")
+    parser.add_argument("--entorno", help="JSON {VARIABLE: \"valor\"} con el entorno que la "
+                                         "fuente lee: sin el mapa, cada lectura es un hueco")
     args = parser.parse_args(argv)
     if args.self_test:
         return _autotest()
@@ -1280,11 +1367,24 @@ def main(argv: list[str] | None = None) -> int:
             print("uso: anchor_oracle.py --manifest M.json [--backend B] [--json]",
                   file=sys.stderr)
             return RC_ARITY
+        if args.entorno:
+            print("el mapa de entorno todavia no viaja en el manifiesto: va por par, "
+                  "y un mapa ignorado en silencio seria un verde sobre nada", file=sys.stderr)
+            return RC_ARITY
         from .manifiesto import correr
 
         return correr(args.manifest, backend=args.backend, json_out=args.json,
                       tolerancia=args.tolerancia,
                       exigir_cobertura_total=args.exigir_cobertura_total)
+
+    def entorno_declarado():
+        if not args.entorno:
+            return None, None
+        try:
+            return _mapa_declarado(leer_texto(args.entorno, "entorno"), args.entorno)
+        except InsumoFalta as exc:
+            return None, ("INSUMO_FALTA", str(exc))
+
     if args.censo:
         if not args.fuente:
             print("uso: anchor_oracle.py --fuente F.ts --censo [--json]", file=sys.stderr)
@@ -1293,9 +1393,12 @@ def main(argv: list[str] | None = None) -> int:
             texto_censo = leer_texto(args.fuente, "fuente")
         except InsumoFalta as exc:
             return no_medido("INSUMO_FALTA", str(exc))
+        entorno, fallo_mapa = entorno_declarado()
+        if fallo_mapa:
+            return no_medido(*fallo_mapa)
         motivos: dict[str, str] = {}
         anclas = extraer_anclas(texto_censo, motivos)
-        cobertura = censo(anclas, motivos)
+        cobertura = censo(anclas, motivos, entorno=entorno)
         if args.json:
             print(json.dumps({"anclas": anclas, "censo": cobertura}, indent=2,
                              sort_keys=True))
@@ -1315,13 +1418,15 @@ def main(argv: list[str] | None = None) -> int:
         # boxes the file has, how many it read, how many it can price, and how much of the
         # rest is an environment that is not there. The structural part then says what
         # stopped it, because "no se puede tokenizar" is the reader's voice, not the language's.
-        entorno = (f"{len(cobertura['con_entorno'])} con entorno · "
-                   if cobertura["con_entorno"] else "")
+        en_entorno = (f"{len(cobertura['con_entorno'])} con entorno · "
+                      if cobertura["con_entorno"] else "")
         reparto = (f" ({' · '.join(f'{k} {v}' for k, v in cobertura['por_causa'].items())})"
                    if cobertura["por_causa"] else "")
-        print(f"CENSO · {cobertura['declaradas']} declarada(s) · "
+        declarado = (f"{len(cobertura['entorno'])} variable(s) declarada(s) · "
+                     if cobertura["entorno"] else "")
+        print(f"CENSO · {declarado}{cobertura['declaradas']} declarada(s) · "
               f"{cobertura['leidas']} leida(s) ({cuanto}) · "
-              f"{cobertura['evaluables']} evaluable(s) · {entorno}"
+              f"{cobertura['evaluables']} evaluable(s) · {en_entorno}"
               f"{cobertura['estructurales']} por estructura{reparto} · las funciones con "
               f"cuerpo de bloque y las variables locales no se leen")
         return RC_OK
@@ -1341,9 +1446,13 @@ def main(argv: list[str] | None = None) -> int:
     if fallo:
         print(f"NO_MEDIDO · {fallo[0]} · {fallo[1]}", file=sys.stderr)
         return RC_NO_MEDIDO
+    entorno, fallo_mapa = entorno_declarado()
+    if fallo_mapa:
+        return no_medido(*fallo_mapa)
     recibo = comparar(texto, referencia, tolerancia=args.tolerancia, vivos=vivos,
                       backend=backend,
-                      exigir_cobertura_total=args.exigir_cobertura_total)
+                      exigir_cobertura_total=args.exigir_cobertura_total,
+                      entorno=entorno)
     if aviso:
         recibo["aviso"] = aviso
     if args.json:

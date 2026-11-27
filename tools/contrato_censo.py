@@ -50,12 +50,15 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
     (caja / "malo.json").write_text(json.dumps({"CANVAS_W": 999.0}))
     (caja / "vacia.json").write_text("{}")
     (caja / "vacio.txt").write_text("")
+    (caja / "entorno.json").write_text(json.dumps({"CANVAS_W": "1080"}))
+    (caja / "entorno-num.json").write_text(json.dumps({"CANVAS_W": 1080}))
     (caja / "a.txt").write_text(_perfil(raiz, 600, fase=0.25))
     (caja / "b.txt").write_text(_perfil(raiz, 600, semillas=(0.037, 0.101, 0.229)))
     ref = str(raiz / "fixtures" / "anchors.json")
     eng = str(raiz / "fixtures" / "engine.ts")
     malo, a, b, falta = str(caja / "malo.json"), str(caja / "a.txt"), str(caja / "b.txt"), "/no-existe"
     vacia, vacio = str(caja / "vacia.json"), str(caja / "vacio.txt")
+    mapa, mapa_num = str(caja / "entorno.json"), str(caja / "entorno-num.json")
     nodo = _hay_nodo(raiz)
     # Sin node, el lector no puede medir y lo dice: la celda vacia es NO_MEDIDO, no un 0.
     lo_ok, lo_clase, lo_motivo = ((RC_OK, MEDIDO, "") if nodo else
@@ -89,6 +92,10 @@ def casos(raiz: Path, caja: Path) -> list[dict]:
         ("anchor_oracle", RC_ARITY, ("--inexistente",), RC_ARITY, MEDIDO, ""),
         ("anchor_oracle", RC_OK, ("--fuente", eng, "--referencia", ref, "--backend", "estatico"),
          RC_OK, MEDIDO, ""),
+        ("anchor_oracle", RC_OK, ("--fuente", eng, "--censo", "--entorno", mapa),
+         RC_OK, MEDIDO, ""),
+        ("anchor_oracle", RC_NO_MEDIDO, ("--fuente", eng, "--censo", "--entorno", mapa_num),
+         RC_NO_MEDIDO, MEDIDO, "un mapa con numeros describe un tipo que el despliegue no tiene"),
         fila_node,
 
         ("live_oracle", RC_OK, ("--fuente", eng, "--referencia", ref), lo_ok, lo_clase, lo_motivo),

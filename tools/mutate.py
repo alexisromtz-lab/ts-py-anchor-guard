@@ -284,6 +284,26 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      'raise FuenteIlegible(f"{base}: {fallo}", causa="BLOQUEADA_POR_ANCLA") from None',
      'raise FuenteIlegible(f"{base}: {fallo}") from None',
      "el ancla que solo apunta se culpa a si misma en vez de nombrar a la que lee"),
+    # --- el mapa de entorno: la lectura es una funcion de un despliegue ---
+    ("ao_entorno_default", "ts_py_anchor_guard/anchor_oracle.py",
+     '            raise FuenteIlegible(f"variable de entorno no declarada: {variable}",\n'
+     '                                 causa="VARIABLE_NO_DECLARADA")',
+     '            return ""',
+     "la variable ausente del mapa se evalua como cadena vacia: el hueco se lee como verde"),
+    ("ao_entorno_ignorado", "ts_py_anchor_guard/anchor_oracle.py",
+     "        self.mapa = mapa\n",
+     "        self.mapa = None\n",
+     "el mapa se recibe y no se usa: el censo publica un entorno que no evaluo"),
+    ("ao_entorno_sin_publicar", "ts_py_anchor_guard/anchor_oracle.py",
+     '        "entorno": dict(sorted(entorno.items())) if entorno else {},',
+     '        "entorno": {},',
+     "el censo no publica con que mapa midio: dos despliegues del mismo commit son el mismo "
+     "recibo"),
+    ("ao_entorno_numero", "ts_py_anchor_guard/anchor_oracle.py",
+     "    if malos:",
+     "    if False:",
+     "un mapa con numeros se coacciona a texto: el mapa describe un tipo que el despliegue "
+     "no puede tener"),
     # --- el manifiesto: datos que encienden compuertas ---
     ("mf_version_ignorada", "ts_py_anchor_guard/manifiesto.py",
      "    if version != VERSION:",

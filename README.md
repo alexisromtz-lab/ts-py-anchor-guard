@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.2`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.3`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -291,9 +291,37 @@ What it cost, and none of it was the language's:
 
 The measurement that matters for the next act is the cross, now priced: of calcom's 60
 environment-bound anchors, **13 are blocked by the environment alone** and **31 also stop at a
-boolean operator**. So `--env` moves 38 to 51 and no further, and the operator surface rejected in
-`0.9.1` was never wrong — it was waiting for a declared environment to make `X || 3` a function of
-two known values instead of a silent fallback. Gemini's estimate of ≥45 was off by 32.
+boolean operator**. `0.9.2` read those 13 through `causa_de` — the head of a chain — and
+published `--env` at 38 → 51; `0.9.3` measured **48**, because three of the thirteen have a
+second blocker standing behind the read. The operator surface set aside in `0.9.1` was never
+wrong either: it is what stops the other 50.
+
+`0.9.3` is that environment becoming an **argument** instead of a hole. `--entorno map.json`
+takes `{VARIABLE: "valor"}` — the deployment the source is written for — and a read of
+`process.env.X` becomes a value only when `X` is in that map. Measured on
+`calcom/cal.com@ae027bb7`, declaring the 63 variables the file reads moves **38 → 48 of 118**
+(40,7 %): `con_entorno` 60 → 50, `estructurales` 20 → 20. The prediction was 51; the 3 that did
+not move are the ones whose first cause was the environment and whose second was `as string`,
+`parseInt(…)` and a ternary — `causa_de` publishes the head of a chain and not the chain.
+
+Four decisions hold the act together, and each of them is a way to be green over nothing:
+
+- **No default, ever.** `X` absent from the map is `VARIABLE_NO_DECLARADA`, not the fallback:
+  `process.env.FALTA || "d"` stays unpriced even when the map is non-empty, because the value
+  would come from an operator act that does not exist yet. A map is a closed world or it is
+  nothing.
+- **The map is published in every receipt.** `censo` and the five terminal receipts of
+  `comparar` carry `entorno`, because the same commit under another map is another census. Without
+  it a differential receipt is two numbers with no argument between them.
+- **An unreadable map is `NO_MEDIDO`, never an empty map.** An empty map is exactly what a source
+  that reads nothing looks like, so turning a typo into one would silence every read in the file.
+  A number in the map is refused for the same reason: `process.env` yields text, and coercing
+  `25` to `"25"` describes a type the deployment cannot have.
+- **`--manifest` refuses `--entorno` out loud.** The map does not travel in the manifest yet, and
+  a flag accepted and ignored is the "green over nothing" this series keeps finding.
+
+The bracket form `process.env["PORT"]` and the dotted `process.env.PORT` are the same read, and a
+string that merely names a variable — `"process.env.PORT"` — is still a value.
 
 ## Use as a GitHub Action
 
@@ -558,6 +586,19 @@ anchors stay `NO_EVALUABLE` with their own motive in `no_evaluables`. What chang
 the number no longer lies about *why* — a parser gap is work, a variable nobody set is a
 fact about the deployment.
 
+Declaring that deployment turns the reads that have nothing behind them into values:
+
+```
+$ python -m ts_py_anchor_guard.anchor_oracle --fuente calcom/constants.ts --censo \
+      --entorno calcom-env.json
+CENSO · 63 variable(s) declarada(s) · 118 declarada(s) · 118 leida(s) (100.0%) ·
+48 evaluable(s) · 50 con entorno · 20 por estructura (… OPERADOR_BOOLEANO 4 ·
+PLANTILLA_LITERAL 9 …) · las funciones con cuerpo de bloque y las variables locales no se leen
+```
+
+`entorno` travels in every receipt, so a receipt without it is a census of no deployment in
+particular.
+
 The two silences are different questions and get different names: `no_leidas` is the reader
 (it never returned the declaration) and `no_evaluables` is the language (it returned it and
 this subset cannot value it — `nearestNode` is a `reduce`, refused by name in the section
@@ -820,8 +861,8 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `71` of `75` mutants killed under CPython 3.14.8, `0` flaky, `0` coverage holes; the `4` that no input reaches are declared with their reason, and a kill from another module's test is reported rather than counted (`3`, all declared) | 75 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 75 mutations and names the exemptions with their reason |
-| `16` of `20` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `16` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
+| `75` of `79` mutants killed under CPython 3.14.8, `0` flaky, `0` coverage holes; the `4` that no input reaches are declared with their reason, and a kill from another module's test is reported rather than counted (`3`, all declared) | 79 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 79 mutations and names the exemptions with their reason |
+| `18` of `22` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `18` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
 
@@ -833,10 +874,10 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 75 mutations, 71 killed
+### What the tests would notice: 79 mutations, 75 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 75 one-line
+open the fixture" but "if the code were wrong, would anything go red" — so 79 one-line
 mutations are applied across nine sites (the five modules, the CLI, and the three harness
 probes), each in a fresh copy, each followed by the whole suite.
 
@@ -921,7 +962,7 @@ probes), each in a fresh copy, each followed by the whole suite.
   the test that asserts both forms. Measured run: `aplicables: 72 · muertos: 68 · vivos: 4 ·
   flaky: 0 · huecos de cobertura: ninguno`, exit code `0` — with the same four declared
   survivors, so a wider reader did not quietly buy a smaller denominator.
-- **71 of 75 die now**, and the ninth pass measures the names. Three mutants over the
+- **75 of 79 die now**, and the tenth pass measures the declared environment. Three mutants over the
   taxonomy, all dead by a test of `TaxonomiaTest` and none by a test of another module: the
   classifier replaced by its own fallback (`ao_causa_cajon`, killed by the hand-over test), the
   longest match turned into the last match so `!==` publishes as `!` (`ao_causa_mas_corta`),
@@ -931,6 +972,15 @@ probes), each in a fresh copy, each followed by the whole suite.
   constructs did not buy a smaller denominator. The run took 71 minutes because three foreign
   `pytest` processes were running on the same machine; the harness repeats every red on a fresh
   copy, which is why contention shows up as `flaky` and not as a kill.
+- **The tenth pass turns the environment into a frontier.** Four mutants, all dead by a test
+  of `EntornoDeclaradoTest` and none by a test of another module: the absent variable
+  evaluated as an empty string (`ao_entorno_default`, killed by the repair that counts the
+  three populations), the map received and thrown away (`ao_entorno_ignorado`, killed by the
+  fallback test it resurrects), the census publishing an empty map (`ao_entorno_sin_publicar`,
+  killed by the receipt test), and a numeric map coerced to text (`ao_entorno_numero`, killed
+  by the CLI that refuses it). Measured run: `aplicables: 79 · muertos: 75 · vivos: 4 ·
+  flaky: 0 · huecos de cobertura: ninguno`, exit code `0` — the same four declared survivors
+  for the fourth pass running, so a declared environment did not buy a smaller denominator.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to
