@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.0`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.1`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -243,6 +243,23 @@ branch name into a conforming one. `--censo` gained the denominator — `declara
 `NO_EVALUABLE` is the subset) — because a coverage figure computed from what the reader reached
 is the instrument measuring itself. The self-test grew from 33 anchors to 44. The minor moves
 because the receipt gained a value type; no exit code changed.
+
+`0.9.1` is that denominator getting its third part. Two held-out files — `calcom/cal.com@ae027bb7`
+118 declarations, `immich-app/immich@a51a4385` 16 — read **134 of 134** and evaluate 38 and 12.
+Reading generalises and evaluating does not, and the census was blaming the parser for it: on
+calcom, 60 of the 80 refusals read `process.env`. Those are now their own population,
+`con_entorno`, carrying the variables each anchor reads, so 118 publishes as 38 evaluable + 60
+environment-bound + 20 structural. An anchor that reads the environment is still refused — with
+its own motive — because a variable that is not set is not a value; what changes is that the
+number stops calling a deployment fact a reader gap. Text that merely *names* a variable
+(`"process.env.X"` in a message or a comment) is not a dependency: the decision is taken on the
+mask, which is what makes `["X"]` count as environment while the string does not.
+
+The next step was pre-registered and refuted without writing the code: teaching the reader `!`,
+`||`, `&&` and `true`/`false` was predicted to take calcom from 38 to 70-90 evaluable. The same
+declarations that use `||` also read `process.env.WEBAPP_URL`, so the operator surface is not the
+binding constraint. A prediction that dies before the change is cheaper than one that dies after
+it.
 
 ## Use as a GitHub Action
 
@@ -457,6 +474,23 @@ numeric separator, 1 spread, 3 with no single cause. The first version of that c
 subject and would have reported 100 % of its own reach — which is why `--censo` prints the
 declared count next to the read one.
 
+Those three files are also the ones the reader was taught on, so two held-out files were run
+next, pinned by commit and untouched by any of that work: `calcom/cal.com@ae027bb7`
+`packages/lib/constants.ts` (14 085 B, 118 declarations) and `immich-app/immich@a51a4385`
+`web/src/lib/constants.ts` (10 694 B, 16). The reader returns **134 of 134** and evaluates 38
+and 12. Reading generalises; *evaluating* does not, and the reason is not the parser: on
+calcom, 60 of the 80 refusals read `process.env` and only 20 are syntax. A `constants` file
+is mostly an interface to an environment that is not here, so `--censo` names that
+population apart instead of filing it with the reader's own gaps — the three parts publish
+the denominator: 118 = 38 evaluable + 60 environment-bound + 20 structural.
+
+The tempting next step was to teach the reader `!`, `||`, `&&` and `true`/`false`, which it
+does not support. That was pre-registered against these two files with a prediction of 38 →
+70-90 evaluable on calcom, and it is **refuted before writing a line**: teaching operators
+moves almost nothing, because the same declarations that use `||` also read
+`process.env.WEBAPP_URL`. The operator surface is not the binding constraint and the
+measurement says so.
+
 Precedence in the receipt: a measured divergence (`RC 1`) outranks a gap (`RC 2`), because
 a number that is wrong is a fact while a number that is unreadable is a hole in the census.
 `cobertura` publishes the scope of every receipt — how many anchors the source declares, how
@@ -472,9 +506,23 @@ CANVAS_W · const · 1080
 ...
 NO_LEIDA onNode · funcion con cuerpo de bloque
 NO_EVALUABLE nearestNode · no se puede tokenizar en 18: ' => (Math.abs(b - v)'
-CENSO · 20 declarada(s) · 19 leida(s) (95.0%) · 18 evaluable(s) · las funciones con cuerpo de
-bloque y las variables locales no se leen
+CENSO · 20 declarada(s) · 19 leida(s) (95.0%) · 18 evaluable(s) · 1 por estructura · las
+funciones con cuerpo de bloque y las variables locales no se leen
 ```
+
+The same line over a file that reads the environment — `calcom/cal.com@ae027bb7`
+`packages/lib/constants.ts` — splits the remainder in two:
+
+```
+CENSO · 118 declarada(s) · 118 leida(s) (100.0%) · 38 evaluable(s) · 60 con entorno ·
+20 por estructura · las funciones con cuerpo de bloque y las variables locales no se leen
+```
+
+`con_entorno` maps each such anchor to the variables it reads
+(`CALCOM_ENV · ['CALCOM_ENV', 'NODE_ENV']`), and it is a report, not an excuse: those
+anchors stay `NO_EVALUABLE` with their own motive in `no_evaluables`. What changes is that
+the number no longer lies about *why* — a parser gap is work, a variable nobody set is a
+fact about the deployment.
 
 The two silences are different questions and get different names: `no_leidas` is the reader
 (it never returned the declaration) and `no_evaluables` is the language (it returned it and
@@ -751,7 +799,7 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 69 mutations, 65 killed
+### What the tests would notice: 72 mutations, 68 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
 open the fixture" but "if the code were wrong, would anything go red" — so 60 one-line
@@ -829,6 +877,16 @@ probes), each in a fresh copy, each followed by the whole suite.
   also checked against a focused test, so none of them rests on the fixture alone. Measured
   run: `aplicables: 69 · muertos: 65 · vivos: 4 · flaky: 0 · huecos de cobertura: ninguno`,
   exit code `0`.
+- **68 of 72 die now**, and the eighth pass measures the third part of the census. Three
+  mutants over the environment predicate, all dead by a test of `EntornoTest`: the variable
+  that the receipt must name (`ao_entorno_no_se_nombra`, killed by the CLI test), the read
+  found where there is only text (`ao_entorno_en_el_texto`), and the bracketed form dropped
+  from the pattern (`ao_entorno_sin_corchetes`). The third one took two attempts to be a
+  useful mutant: the first version broke the pattern outright and the mutant died for the
+  wrong reason, so the pattern now narrows the group from `([^"']+)` to `(\d+)` and dies on
+  the test that asserts both forms. Measured run: `aplicables: 72 · muertos: 68 · vivos: 4 ·
+  flaky: 0 · huecos de cobertura: ninguno`, exit code `0` — with the same four declared
+  survivors, so a wider reader did not quietly buy a smaller denominator.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to

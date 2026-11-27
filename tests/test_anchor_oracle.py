@@ -447,3 +447,59 @@ class TextoEsUnValorTest(unittest.TestCase):
         texto = salida.getvalue()
         self.assertIn("CENSO · 2 declarada(s) · 1 leida(s) (50.0%)", texto)
         self.assertIn("NO_LEIDA f ·", texto)
+
+
+class EntornoTest(unittest.TestCase):
+    """The third population: an anchor whose value is decided outside the source.
+
+    Measured on `calcom/cal.com@ae027bb7` `packages/lib/constants.ts`: of 80 refusals, 60
+    name the environment. Filing them with the reader's own gaps made the census look like
+    a parser problem, and no amount of parser work moves that number.
+    """
+
+    def _censo(self, fuente: str):
+        from ts_py_anchor_guard.anchor_oracle import censo
+        motivos: dict = {}
+        anclas = extraer_anclas(fuente, motivos=motivos)
+        return censo(anclas, motivos)
+
+    def test_un_ancla_que_lee_el_entorno_se_nombra_con_su_variable(self):
+        recuento = self._censo('export const U = process.env.WEBAPP_URL ?? "https://x";\n')
+        self.assertEqual(recuento["evaluables"], 0)
+        self.assertEqual(recuento["con_entorno"], {"U": ["WEBAPP_URL"]})
+        self.assertEqual(recuento["estructurales"], 0)
+        self.assertIn("U", recuento["no_evaluables"])  # still refused, never guessed
+
+    def test_las_dos_formas_de_leer_el_entorno_cuentan(self):
+        recuento = self._censo('export const A = process.env["CLAVE"];\n'
+                              'export const B = import.meta.env.DEV;\n')
+        self.assertEqual(recuento["con_entorno"],
+                         {"A": ["CLAVE"], "B": ["DEV"]})
+
+    def test_el_texto_que_nombra_el_entorno_no_lo_lee(self):
+        """A string spelling the variable is a value, not a dependency."""
+        recuento = self._censo('export const M = "process.env.X" + 1;\n')
+        self.assertEqual(recuento["con_entorno"], {})
+        self.assertEqual(recuento["estructurales"], 1)
+
+    def test_las_tres_partes_suman_el_denominador(self):
+        recuento = self._censo('export const A = 864;\n'
+                              'export const U = process.env.X || "y";\n'
+                              'export const f = (u) => { return u; };\n')
+        self.assertEqual(recuento["declaradas"], 3)
+        self.assertEqual(recuento["evaluables"] + len(recuento["con_entorno"])
+                         + recuento["estructurales"] + len(recuento["no_leidas"]), 3)
+
+    def test_la_cli_publica_la_parte_del_entorno_en_el_resumen(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = pathlib.Path(caja) / "ent.ts"
+            fuente.write_text('export const A = 864;\n'
+                              'export const U = process.env.X || "y";\n')
+            with contextlib.redirect_stdout(io.StringIO()) as salida, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["--fuente", str(fuente), "--censo"])
+        self.assertEqual(rc, RC_OK)
+        self.assertIn("1 evaluable(s) · 1 con entorno · 0 por estructura", salida.getvalue())

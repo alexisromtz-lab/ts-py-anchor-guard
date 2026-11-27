@@ -389,15 +389,40 @@ def extraer_anclas(texto: str, motivos: dict[str, str] | None = None) -> dict[st
     return anclas
 
 
+# A `constants` file is mostly an interface to its environment, and that is not a defect the
+# static reader can fix: `process.env.X ?? "https://cal.com"` has no value until `X` exists.
+# Measured on `calcom/cal.com@ae027bb7` `packages/lib/constants.ts`: of 80 refusals, 62 name
+# the environment and only a handful are syntax the reader could learn. So the census names
+# that population on its own instead of filing it with the reader's own gaps.
+_ENTORNO = re.compile(r"\b(?:process\.env|import\.meta\.env)"
+                      r"(?:\.([A-Za-z_$][\w$]*)|\s*\[\s*[\"']([^\"']+)[\"']\s*\])")
+
+
+def _lee_entorno(cuerpo: str) -> list[str]:
+    """Environment variables a body reads -- text and comments that name them do not count.
+
+    `"process.env.X"` is a string, and a file that spells the name in a message or a comment
+    is not reading the environment: the mask says which characters are code. The key of the
+    bracket form (`process.env["X"]`) is text by construction, so the decision is taken on
+    the position of `process`/`import`, not on the whole match.
+    """
+    mascara = _mascara(cuerpo)
+    return sorted({a or b for m in _ENTORNO.finditer(cuerpo)
+                   if m.start() < len(mascara) and mascara[m.start()]
+                   for a, b in [m.groups()]})
+
+
 def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
     """How much of a source the reader covers, and what it says about the rest.
 
-    Two different numbers, and neither is a green: `leidas` is what the reader returned at
-    all, `evaluables` is what it can also turn into a value. A file where the reader
-    returns 20 anchors and evaluates 3 is a file the instrument measures 15 % of, and the
-    motives name which half of the silence is the language and which half is the reader.
+    Three different numbers, and none is a green: `leidas` is what the reader returned at
+    all, `evaluables` is what it can also turn into a value, and `con_entorno` is the part
+    of the remainder that has no value until the environment it reads exists. A file where
+    the reader returns 20 anchors and evaluates 3 is a file the instrument measures 15 % of,
+    and the motives name which half of the silence is the language, which half is the
+    reader, and which half is a variable nobody set.
     """
-    evaluables, fallos, cache = [], {}, {}
+    evaluables, fallos, cache, con_entorno = [], {}, {}, {}
     for nombre, ancla in anclas.items():
         try:
             if ancla["tipo"] == "const":
@@ -406,12 +431,19 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
                 _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
         except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
             fallos[nombre] = str(fallo)
+            # A refusal that reads the environment is not the reader's gap and not a
+            # divergence: it is an anchor whose value is decided outside the source.
+            variables = _lee_entorno(ancla["cuerpo"])
+            if variables:
+                con_entorno[nombre] = variables
             continue
         evaluables.append(nombre)
     declaradas = len(anclas) + len(motivos)
     return {"declaradas": declaradas, "leidas": len(anclas),
             "evaluables": len(evaluables),
             "cobertura": round(len(anclas) / declaradas, 4) if declaradas else None,
+            "con_entorno": dict(sorted(con_entorno.items())),
+            "estructurales": len(fallos) - len(con_entorno),
             "no_leidas": dict(sorted(motivos.items())),
             "no_evaluables": dict(sorted(fallos.items()))}
 
@@ -1189,10 +1221,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"NO_EVALUABLE {nombre} · {por_que}")
         cuanto = ("NO_MEDIDO" if cobertura["cobertura"] is None
                   else f"{cobertura['cobertura']:.1%}")
+        # The three parts of the denominator, in the order a reader asks for them: how many
+        # boxes the file has, how many it read, how many it can price, and how much of the
+        # rest is an environment that is not there.
+        entorno = (f"{len(cobertura['con_entorno'])} con entorno · "
+                   if cobertura["con_entorno"] else "")
         print(f"CENSO · {cobertura['declaradas']} declarada(s) · "
               f"{cobertura['leidas']} leida(s) ({cuanto}) · "
-              f"{cobertura['evaluables']} evaluable(s) · las funciones con cuerpo de bloque "
-              f"y las variables locales no se leen")
+              f"{cobertura['evaluables']} evaluable(s) · {entorno}"
+              f"{cobertura['estructurales']} por estructura · las funciones con cuerpo de "
+              f"bloque y las variables locales no se leen")
         return RC_OK
     if not args.fuente or not args.referencia:
         print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]\n"
