@@ -503,3 +503,87 @@ class EntornoTest(unittest.TestCase):
                 rc = main(["--fuente", str(fuente), "--censo"])
         self.assertEqual(rc, RC_OK)
         self.assertIn("1 evaluable(s) · 1 con entorno · 0 por estructura", salida.getvalue())
+
+
+class TaxonomiaTest(unittest.TestCase):
+    """Every structural refusal names the construct that stopped the reader.
+
+    Measured on the 25 structural refusals of `calcom/cal.com@ae027bb7` (20),
+    `immich-app/immich@a51a4385` (4) and `fixtures/engine.ts` (1): 9 are template literals,
+    4 boolean operators, 3 arrow functions, 2 comparisons, 2 member accesses, 2 regex
+    literals, 1 type assertion, 1 reserved word and 1 constant that inherits the refusal of
+    the constant it reads. The guess -- `.length`, calls, `satisfies`, `=>` -- named 1 of 20.
+    """
+
+    def _censo(self, fuente: str):
+        from ts_py_anchor_guard.anchor_oracle import censo
+        motivos: dict = {}
+        anclas = extraer_anclas(fuente, motivos=motivos)
+        return censo(anclas, motivos)
+
+    def test_la_plantilla_se_nombra_y_el_motivo_no_cambia(self):
+        """Naming a cause adds a name, it does not rewrite the message a consumer parses."""
+        recuento = self._censo('export const T = `${A}px`;\n')
+        self.assertEqual(recuento["por_causa"], {"PLANTILLA_LITERAL": 1})
+        self.assertIn("no se puede tokenizar", recuento["no_evaluables"]["T"])
+
+    def test_el_simbolo_mas_largo_gana(self):
+        """`!==` is a comparison; only the leftover `!` is a boolean operator."""
+        recuento = self._censo('export const A = B === "x";\n'
+                              'export const C = D !== 1;\n'
+                              'export const E = F || 2;\n'
+                              'export const G = H!;\n')
+        self.assertEqual(recuento["causa_de"],
+                         {"A": "COMPARACION", "C": "COMPARACION",
+                          "E": "OPERADOR_BOOLEANO", "G": "OPERADOR_BOOLEANO"})
+
+    def test_el_miembro_opcional_no_es_un_ternario(self):
+        """`?` is a token, so the tokenizer never sees it here: `?.` is a member access."""
+        recuento = self._censo('export const M = globalThis.window?.x;\n')
+        self.assertEqual(recuento["causa_de"], {"M": "MIEMBRO"})
+
+    def test_el_literal_de_regex_se_nombra_aunque_falle_dentro(self):
+        """The mask says where the literal opens, so the cause is the literal and not its `/`."""
+        recuento = self._censo(r"export const R = /^[a-z]+:\/\//;" + "\n")
+        self.assertEqual(recuento["por_causa"], {"REGEX_LITERAL": 1})
+
+    def test_el_nombre_reservado_y_la_asercion_se_nombran(self):
+        recuento = self._censo('export const N = new Set([1]);\n'
+                              'export const O = {a: {b: 1} satisfies T, c: 2};\n')
+        self.assertEqual(recuento["causa_de"],
+                         {"N": "PALABRA_RESERVADA", "O": "ASERCION_TIPO"})
+
+    def test_el_ancla_que_hereda_nombra_el_ancla_culpable(self):
+        """`A = B` fails at a position inside `B`; without the prefix the cause lies about `A`."""
+        recuento = self._censo('export const A = B;\nexport const B = C || 1;\n')
+        self.assertEqual(recuento["causa_de"]["B"], "OPERADOR_BOOLEANO")
+        self.assertEqual(recuento["causa_de"]["A"], "BLOQUEADA_POR_ANCLA")
+        self.assertTrue(recuento["no_evaluables"]["A"].startswith("B: "))
+
+    def test_el_reparto_cubre_la_poblacion_estructural(self):
+        """A bucket that swallows what it cannot name is the defect this act removes."""
+        recuento = self._censo('export const T = `${A}px`;\n'
+                              'export const R = "a" + 1;\n'
+                              'export const U = process.env.X || "y";\n')
+        self.assertEqual(sum(recuento["por_causa"].values()), recuento["estructurales"])
+        self.assertEqual(sum(recuento["por_causa"].values())
+                         + len(recuento["con_entorno"]), len(recuento["no_evaluables"]))
+        self.assertNotIn("SIMBOLO_NO_NOMBRADO", recuento["por_causa"])
+        self.assertEqual(recuento["causa_de"]["R"], "REGLA_DEL_EVALUADOR")
+
+    def test_la_cli_nombra_la_causa_de_cada_rechazo(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = pathlib.Path(caja) / "tax.ts"
+            fuente.write_text('export const T = `${A}px`;\n'
+                              'export const U = process.env.X || "y";\n')
+            with contextlib.redirect_stdout(io.StringIO()) as salida, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["--fuente", str(fuente), "--censo"])
+        self.assertEqual(rc, RC_OK)
+        texto = salida.getvalue()
+        self.assertIn("NO_EVALUABLE T · PLANTILLA_LITERAL · ", texto)
+        self.assertIn("NO_EVALUABLE U · EN_ENTORNO · ", texto)
+        self.assertIn("1 por estructura (PLANTILLA_LITERAL 1)", texto)

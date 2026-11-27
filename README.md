@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.1`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.2`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -260,6 +260,40 @@ The next step was pre-registered and refuted without writing the code: teaching 
 declarations that use `||` also read `process.env.WEBAPP_URL`, so the operator surface is not the
 binding constraint. A prediction that dies before the change is cheaper than one that dies after
 it.
+
+`0.9.2` is that refusal learning to say **what** refused. Of the 25 structural refusals in the
+two held-out files plus `fixtures/engine.ts`, **all 25 said `no se puede tokenizar`** — one
+message for nine different constructs, so a limit of this reader was publishing itself in the
+voice of a syntax error in the source. Each refusal now carries a name: `PLANTILLA_LITERAL` 9,
+`OPERADOR_BOOLEANO` 4, `FUNCION_FLECHA` 3, `COMPARACION` 2, `MIEMBRO` 2, `REGEX_LITERAL` 2,
+`ASERCION_TIPO` 1, `PALABRA_RESERVADA` 1, `BLOQUEADA_POR_ANCLA` 1. The prediction that failed
+first was the guess: naming `.length`, calls, `satisfies`/`as` and `=>` was predicted to explain
+17 of calcom's 20 and leave under 3 % generic. Measured, those four cover **1 of 20**; the
+template literal, which the guess never mentioned, is **9 of 20** (45 %). The census publishes
+`por_causa` over the structural population and `causa_de` for every refusal, with the invariant
+`suma(por_causa) + con_entorno == no_evaluables` asserted in the tests.
+
+What it cost, and none of it was the language's:
+
+- **A refusal can be inherited.** `BASE_URL = WEBAPP_URL` reported `no se puede tokenizar en 50`
+  on a body ten characters long: the position belonged to the constant it reads. A classifier
+  that scanned the body would have lied on 1 of 25, so the inheritance is labelled where it
+  happens and the message gains the culprit's name (`WEBAPP_URL: …`).
+- **"Unnamed" points both ways.** A refusal the tables do not cover still comes from a rule of
+  the evaluator, and that rule writes its name in the message (`texto en aritmetica`).
+  Reporting it as `SIN_CAUSA_NOMBRADA` was the same defect pointing the other way, so it reads
+  `REGLA_DEL_EVALUADOR`: an entry saying where to read, not a bucket pretending to be a
+  diagnosis.
+- **The mask, not the delimiters, names the literal.** A masked position has no token, so the
+  cause is the literal that stands there — found by walking back to where it opens, which is why
+  the `/` of a division does not become `REGEX_LITERAL` and a `?.` inside a comment does not
+  become `MIEMBRO`. On code the longest match wins, so `!==` is a comparison and not a `!`.
+
+The measurement that matters for the next act is the cross, now priced: of calcom's 60
+environment-bound anchors, **13 are blocked by the environment alone** and **31 also stop at a
+boolean operator**. So `--env` moves 38 to 51 and no further, and the operator surface rejected in
+`0.9.1` was never wrong — it was waiting for a declared environment to make `X || 3` a function of
+two known values instead of a silent fallback. Gemini's estimate of ≥45 was off by 32.
 
 ## Use as a GitHub Action
 
@@ -786,7 +820,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `58` of `63` mutants killed under CPython 3.12.13, `57` under 3.9.6; the `5` that no input reaches are declared with their reason, and the sixth — the `-B` flag — is declared only on an interpreter that writes no `.pyc` (measured: `2` files for a cold import against `0`) | 63 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 63 mutations and names the exemptions with their reason, conditional ones included |
+| `71` of `75` mutants killed under CPython 3.14.8, `0` flaky, `0` coverage holes; the `4` that no input reaches are declared with their reason, and a kill from another module's test is reported rather than counted (`3`, all declared) | 75 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 75 mutations and names the exemptions with their reason |
 | `16` of `20` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `16` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -799,10 +833,10 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 72 mutations, 68 killed
+### What the tests would notice: 75 mutations, 71 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
-open the fixture" but "if the code were wrong, would anything go red" — so 60 one-line
+open the fixture" but "if the code were wrong, would anything go red" — so 75 one-line
 mutations are applied across nine sites (the five modules, the CLI, and the three harness
 probes), each in a fresh copy, each followed by the whole suite.
 
@@ -887,6 +921,16 @@ probes), each in a fresh copy, each followed by the whole suite.
   the test that asserts both forms. Measured run: `aplicables: 72 · muertos: 68 · vivos: 4 ·
   flaky: 0 · huecos de cobertura: ninguno`, exit code `0` — with the same four declared
   survivors, so a wider reader did not quietly buy a smaller denominator.
+- **71 of 75 die now**, and the ninth pass measures the names. Three mutants over the
+  taxonomy, all dead by a test of `TaxonomiaTest` and none by a test of another module: the
+  classifier replaced by its own fallback (`ao_causa_cajon`, killed by the hand-over test), the
+  longest match turned into the last match so `!==` publishes as `!` (`ao_causa_mas_corta`),
+  and the inherited refusal losing its label so the anchor that only points is blamed
+  (`ao_herencia_muda`). Measured run: `aplicables: 75 · muertos: 71 · vivos: 4 · flaky: 0 ·
+  huecos de cobertura: ninguno`, exit code `0` — same four declared survivors, so naming nine
+  constructs did not buy a smaller denominator. The run took 71 minutes because three foreign
+  `pytest` processes were running on the same machine; the harness repeats every red on a fresh
+  copy, which is why contention shows up as `flaky` and not as a kill.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to

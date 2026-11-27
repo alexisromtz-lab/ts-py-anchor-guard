@@ -47,7 +47,17 @@ RC_OK, RC_DIVERGE, RC_NO_MEDIDO, RC_ARITY = 0, 1, 2, 20
 
 
 class FuenteIlegible(ValueError):
-    """The source cannot be read as the declaration subset this module claims to read."""
+    """The source cannot be read as the declaration subset this module claims to read.
+
+    `causa` names *what* the subset cannot read, at the site where it gave up: the literal the
+    mask already knows, the symbol at the failing position, the token that arrived, or the
+    constant this one inherits the refusal from. Without it every refusal spoke with the voice
+    of a syntax error in the source, which is the one thing it never is.
+    """
+
+    def __init__(self, mensaje: str, causa: str | None = None):
+        super().__init__(mensaje)
+        self.causa = causa
 
 
 class AnclaDesconocida(KeyError):
@@ -421,8 +431,12 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
     the reader returns 20 anchors and evaluates 3 is a file the instrument measures 15 % of,
     and the motives name which half of the silence is the language, which half is the
     reader, and which half is a variable nobody set.
+
+    `por_causa` names every structural refusal by the construct that stopped the reader, and
+    it covers the whole remainder with `con_entorno`: `suma(por_causa) + len(con_entorno)`
+    equals the refusals, so no anchor is silent about why it has no value.
     """
-    evaluables, fallos, cache, con_entorno = [], {}, {}, {}
+    evaluables, fallos, cache, con_entorno, causas = [], {}, {}, {}, {}
     for nombre, ancla in anclas.items():
         try:
             if ancla["tipo"] == "const":
@@ -431,6 +445,7 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
                 _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
         except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
             fallos[nombre] = str(fallo)
+            causas[nombre] = getattr(fallo, "causa", None) or _CAUSA_EN_EL_MOTIVO
             # A refusal that reads the environment is not the reader's gap and not a
             # divergence: it is an anchor whose value is decided outside the source.
             variables = _lee_entorno(ancla["cuerpo"])
@@ -438,12 +453,18 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str]) -> dict:
                 con_entorno[nombre] = variables
             continue
         evaluables.append(nombre)
+    por_causa: dict[str, int] = {}
+    for nombre, causa in causas.items():
+        if nombre not in con_entorno:
+            por_causa[causa] = por_causa.get(causa, 0) + 1
     declaradas = len(anclas) + len(motivos)
     return {"declaradas": declaradas, "leidas": len(anclas),
             "evaluables": len(evaluables),
             "cobertura": round(len(anclas) / declaradas, 4) if declaradas else None,
             "con_entorno": dict(sorted(con_entorno.items())),
             "estructurales": len(fallos) - len(con_entorno),
+            "por_causa": dict(sorted(por_causa.items())),
+            "causa_de": dict(sorted(causas.items())),
             "no_leidas": dict(sorted(motivos.items())),
             "no_evaluables": dict(sorted(fallos.items()))}
 
@@ -458,6 +479,63 @@ _TOKEN = re.compile(r"\s*(?:(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d+)?|\.\d[\d_]*
                     r"|(\?\?|\*\*|[-+*/(),:?{}[\]]))")
 
 _CONSTANTES = {"Math.PI": math.pi, "Math.E": math.e}
+
+# A refusal has a cause and the cause has a name. Measured on the 25 structural refusals of
+# `calcom/cal.com@ae027bb7`, `immich-app/immich@a51a4385` and `fixtures/engine.ts`: 9 are
+# template literals, 4 boolean operators, 3 arrow functions, 2 comparisons, 2 member accesses,
+# 2 regex literals, 1 type assertion, 1 reserved word, and 1 constant that inherits the refusal
+# of the constant it reads. Naming `.length`, calls, `satisfies` and `=>` -- the guess -- would
+# have named 1 of the 20 in calcom; the template literal, unguessed, is 9.
+_CAUSAS_SIMBOLO = (
+    ("FUNCION_FLECHA", re.compile(r"=>")),
+    ("COMPARACION", re.compile(r"===|!==|==|!=|<=|>=|<|>")),
+    ("OPERADOR_BOOLEANO", re.compile(r"\|\||&&|!")),
+    ("MIEMBRO", re.compile(r"\?\.|\.(?![0-9])")),
+)
+
+_CAUSAS_NOMBRE = {"satisfies": "ASERCION_TIPO", "as": "ASERCION_TIPO",
+                  "new": "PALABRA_RESERVADA", "typeof": "PALABRA_RESERVADA",
+                  "instanceof": "PALABRA_RESERVADA", "function": "PALABRA_RESERVADA",
+                  "class": "PALABRA_RESERVADA", "await": "PALABRA_RESERVADA",
+                  "delete": "PALABRA_RESERVADA", "void": "PALABRA_RESERVADA",
+                  "this": "PALABRA_RESERVADA"}
+
+# A refusal the tables above do not name still comes from a rule of the evaluator, and that
+# rule writes its name in the message ("texto en aritmetica", "sobra ..."). Calling it
+# unnamed would be the same defect pointing the other way: the entry says where to read.
+_CAUSA_EN_EL_MOTIVO = "REGLA_DEL_EVALUADOR"
+
+
+def _causa_del_simbolo(expr: str, pos: int) -> str:
+    """What the subset cannot read at `pos`: the literal it stands in, or the symbol there.
+
+    A masked character under the tokenizer is a literal with no token of its own, and since
+    0.9.0 a string is a value: what is left is a regex or a template, and the mask says where
+    it opens. On code the longest match wins, so `!==` is a comparison and not a boolean `!`.
+    """
+    mascara = _mascara(expr)
+    while pos < len(expr) and expr[pos].isspace():
+        pos += 1
+    if pos >= len(expr):
+        return "SIMBOLO_NO_NOMBRADO"
+    if not mascara[pos]:
+        while pos > 0 and not mascara[pos - 1]:
+            pos -= 1
+        return {"`": "PLANTILLA_LITERAL",
+                "/": "REGEX_LITERAL"}.get(expr[pos], "SIMBOLO_NO_NOMBRADO")
+    causa, largo = "SIMBOLO_NO_NOMBRADO", 0
+    for nombre, patron in _CAUSAS_SIMBOLO:
+        encontrado = patron.match(expr, pos)
+        if encontrado and encontrado.end() - pos > largo:
+            causa, largo = nombre, encontrado.end() - pos
+    return causa
+
+
+def _causa_del_token(tok: tuple[str, object]) -> str | None:
+    """The name of a valid TypeScript construct the arithmetic subset has no rule for."""
+    if tok[0] == "nombre":
+        return _CAUSAS_NOMBRE.get(tok[1])
+    return {"?": "TERNARIO"}.get(tok[1])
 
 # JS drops the backslash of an unknown escape (`"\q"` is `q`), so an unmapped one is the
 # letter itself and not an error. `\u` and `\x` are decoded because they do carry a value.
@@ -530,7 +608,8 @@ def _tokenizar(expr: str) -> list[tuple[str, object]]:
             break
         m = _TOKEN.match(expr, pos)
         if not m:
-            raise FuenteIlegible(f"no se puede tokenizar en {pos}: {expr[pos:pos + 20]!r}")
+            raise FuenteIlegible(f"no se puede tokenizar en {pos}: {expr[pos:pos + 20]!r}",
+                                 causa=_causa_del_simbolo(expr, pos))
         num, cad, nombre, op = m.groups()
         if num is not None:
             tokens.append(("num", float(num.replace("_", ""))))
@@ -556,7 +635,8 @@ class _Evaluador:
     def _tomar(self, valor=None, tipo=None):
         tok = self._mirar()
         if tok[0] is None or (tipo and tok[0] != tipo) or (valor and tok[1] != valor):
-            raise FuenteIlegible(f"se esperaba {valor or tipo}, llego {tok[1]!r}")
+            raise FuenteIlegible(f"se esperaba {valor or tipo}, llego {tok[1]!r}",
+                                 causa=_causa_del_token(tok))
         self.i += 1
         return tok
 
@@ -691,8 +771,10 @@ class _Evaluador:
                 return float(_CONSTANTES[valor])
             if valor in self.entorno:
                 return self.entorno[valor]
-            raise FuenteIlegible(f"nombre no declarado: {valor}")
-        raise FuenteIlegible(f"token inesperado: {valor!r}")
+            raise FuenteIlegible(f"nombre no declarado: {valor}",
+                                 causa=_CAUSAS_NOMBRE.get(valor))
+        raise FuenteIlegible(f"token inesperado: {valor!r}",
+                             causa=_causa_del_token(("op", valor)))
 
 
 class _Entorno(dict):
@@ -739,8 +821,14 @@ def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[s
     if ancla["tipo"] == "funcion":
         raise FuenteIlegible(f"{base} es una funcion: se evalua en puntos, no como constante")
     en_curso.add(base)
-    valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
-                       _Entorno(anclas, cache, en_curso)).evaluar()
+    try:
+        valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
+                           _Entorno(anclas, cache, en_curso)).evaluar()
+    except FuenteIlegible as fallo:
+        # The position and the quoted text belong to the constant this one reads, not to it:
+        # measured, `BASE_URL = WEBAPP_URL` reported `en 50` on a 10-character body. Naming the
+        # inheritance keeps the census from blaming the line that only points.
+        raise FuenteIlegible(f"{base}: {fallo}", causa="BLOQUEADA_POR_ANCLA") from None
     en_curso.discard(base)
     cache[base] = valor
     return valor if not resto else _miembro(valor, resto, nombre)
@@ -1218,19 +1306,24 @@ def main(argv: list[str] | None = None) -> int:
         for nombre, por_que in cobertura["no_leidas"].items():
             print(f"NO_LEIDA {nombre} · {por_que}")
         for nombre, por_que in cobertura["no_evaluables"].items():
-            print(f"NO_EVALUABLE {nombre} · {por_que}")
+            causa = ("EN_ENTORNO" if nombre in cobertura["con_entorno"]
+                     else cobertura["causa_de"][nombre])
+            print(f"NO_EVALUABLE {nombre} · {causa} · {por_que}")
         cuanto = ("NO_MEDIDO" if cobertura["cobertura"] is None
                   else f"{cobertura['cobertura']:.1%}")
         # The three parts of the denominator, in the order a reader asks for them: how many
         # boxes the file has, how many it read, how many it can price, and how much of the
-        # rest is an environment that is not there.
+        # rest is an environment that is not there. The structural part then says what
+        # stopped it, because "no se puede tokenizar" is the reader's voice, not the language's.
         entorno = (f"{len(cobertura['con_entorno'])} con entorno · "
                    if cobertura["con_entorno"] else "")
+        reparto = (f" ({' · '.join(f'{k} {v}' for k, v in cobertura['por_causa'].items())})"
+                   if cobertura["por_causa"] else "")
         print(f"CENSO · {cobertura['declaradas']} declarada(s) · "
               f"{cobertura['leidas']} leida(s) ({cuanto}) · "
               f"{cobertura['evaluables']} evaluable(s) · {entorno}"
-              f"{cobertura['estructurales']} por estructura · las funciones con cuerpo de "
-              f"bloque y las variables locales no se leen")
+              f"{cobertura['estructurales']} por estructura{reparto} · las funciones con "
+              f"cuerpo de bloque y las variables locales no se leen")
         return RC_OK
     if not args.fuente or not args.referencia:
         print("uso: anchor_oracle.py --fuente F.ts --referencia ref.json [--tolerancia T] [--json]\n"

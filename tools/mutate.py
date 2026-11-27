@@ -270,6 +270,20 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      '        return None, "estatico", None, None',
      "la caida de `auto` deja de publicar por que: un lector mas debil con el nombre del "
      "mas fuerte"),
+    # --- la taxonomia: el rechazo nombra lo que lo detuvo ---
+    ("ao_causa_cajon", "ts_py_anchor_guard/anchor_oracle.py",
+     '        causa, largo = nombre, encontrado.end() - pos\n    return causa',
+     '        causa, largo = nombre, encontrado.end() - pos\n    return "SIMBOLO_NO_NOMBRADO"',
+     "el rechazo vuelve al cajon generico: el limite del lector habla con la voz de un "
+     "error de sintaxis"),
+    ("ao_causa_mas_corta", "ts_py_anchor_guard/anchor_oracle.py",
+     "        if encontrado and encontrado.end() - pos > largo:",
+     "        if encontrado:",
+     "gana el ultimo simbolo y no el mas largo: `!==` se publica como `!`"),
+    ("ao_herencia_muda", "ts_py_anchor_guard/anchor_oracle.py",
+     'raise FuenteIlegible(f"{base}: {fallo}", causa="BLOQUEADA_POR_ANCLA") from None',
+     'raise FuenteIlegible(f"{base}: {fallo}") from None',
+     "el ancla que solo apunta se culpa a si misma en vez de nombrar a la que lee"),
     # --- el manifiesto: datos que encienden compuertas ---
     ("mf_version_ignorada", "ts_py_anchor_guard/manifiesto.py",
      "    if version != VERSION:",
