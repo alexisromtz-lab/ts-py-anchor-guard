@@ -429,7 +429,7 @@ def _lee_entorno(cuerpo: str) -> list[str]:
 
 
 def censo(anclas: dict[str, dict], motivos: dict[str, str],
-          entorno: dict[str, str] | None = None) -> dict:
+          entorno: dict[str, str | None] | None = None) -> dict:
     """How much of a source the reader covers, and what it says about the rest.
 
     Three different numbers, and none is a green: `leidas` is what the reader returned at
@@ -484,12 +484,17 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str],
 
 
 def _mapa_declarado(texto: str, origen: str):
-    """`{VARIABLE: "valor"}` or the reason it is not one. `process.env` yields text.
+    """`{VARIABLE: "valor" | null}` or the reason it is not one. `process.env` yields text.
 
     Refusing a number is not pedantry: coercing `25` to `"25"` would let a map describe a type
     the deployment cannot have, and the first anchor that compares text against it would agree
     for the wrong reason. A map that cannot be read is `NO_MEDIDO`, never an empty map -- an
     empty map looks exactly like "the source reads nothing" and would silence every read.
+
+    `null` is not a value `process.env` can hold, but it is how a deployment says the variable
+    is not defined at all, which is the state `process.env.X` takes when nobody exported it.
+    Declaring it is a decision recorded in the receipt; omitting the key is a different one,
+    and it stays `VARIABLE_NO_DECLARADA`.
     """
     try:
         crudo = json.loads(texto)
@@ -499,10 +504,12 @@ def _mapa_declarado(texto: str, origen: str):
         return None, ("MAPA_ENTORNO_ILEGIBLE",
                       f"{origen!r} no es un objeto {{VARIABLE: valor}}: "
                       f"es {type(crudo).__name__}")
-    malos = sorted(str(k) for k, v in crudo.items() if not isinstance(v, str))
+    malos = sorted(str(k) for k, v in crudo.items()
+                   if v is not None and not isinstance(v, str))
     if malos:
         return None, ("MAPA_ENTORNO_ILEGIBLE",
-                      f"{origen!r}: {', '.join(malos)} no da(n) texto, y process.env da texto")
+                      f"{origen!r}: {', '.join(malos)} no da(n) texto ni null, y process.env "
+                      f"da texto o ausencia")
     return {str(k): v for k, v in crudo.items()}, None
 
 
@@ -513,7 +520,7 @@ def _mapa_declarado(texto: str, origen: str):
 _TOKEN = re.compile(r"\s*(?:(\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d+)?|\.\d[\d_]*)"
                     r"|(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')"
                     r"|([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)"
-                    r"|(\?\?|\*\*|[-+*/(),:?{}[\]]))")
+                    r"|(\?\?|\|\||&&|!(?!=)|\*\*|[-+*/(),:?{}[\]]))")
 
 _CONSTANTES = {"Math.PI": math.pi, "Math.E": math.e}
 
@@ -614,6 +621,24 @@ def _num(valor):
         raise FuenteIlegible(f"no es un numero: {valor!r}")
     return float(valor)
 
+
+def _verdad(valor) -> bool:
+    """Whether a value is truthy in JavaScript, which is not Python's rule for text.
+
+    `""` is false and `"0"` and `"false"` are true: `process.env.DRY_RUN || "no"` in a source
+    that exported `DRY_RUN=false` keeps `"false"`, and a reader that borrowed Python's
+    truthiness would quietly swap in the fallback. Absence (`None`, a key declared null) is
+    false, zero is false, and an object or array literal -- which has no `__bool__` in Python
+    worth trusting here -- is true, as it is in JS.
+    """
+    if valor is None:
+        return False
+    if isinstance(valor, str):
+        return valor != ""
+    if isinstance(valor, (dict, list)):
+        return True  # `[]` and `{}` are truthy in JS, whatever Python thinks of them
+    return bool(valor)
+
 def _clave(valor) -> str:
     """The property name a literal key denotes: `{ 1: x }` keys on `"1"`, not `"1.0"`."""
     if isinstance(valor, float) and valor.is_integer():
@@ -664,7 +689,7 @@ class _Evaluador:
     """Recursive descent over the arithmetic subset: literals, names, `+ - * / **`, calls."""
 
     def __init__(self, tokens: list[tuple[str, object]], entorno: dict[str, float],
-                 mapa: dict[str, str] | None = None):
+                 mapa: dict[str, str | None] | None = None):
         self.tokens, self.i, self.entorno = tokens, 0, entorno
         self.mapa = mapa
 
@@ -674,7 +699,9 @@ class _Evaluador:
         A variable the map does not declare is not defaulted: `X || 3` with `X` absent is a
         silent fallback dressed as a value, and the census would publish it as a measurement of
         the source. The refusal still carries the whole token when no map was given at all, so
-        a caller who did not opt into this has the message it always had.
+        a caller who did not opt into this has the message it always had. A key the map
+        declares `null` returns `None` -- the state `process.env.X` has when nobody exported
+        it -- so `X || "d"` yields the fallback and `X.foo` is still refused.
         """
         if self.mapa is None:
             raise FuenteIlegible(f"nombre no declarado: {escrito}",
@@ -707,12 +734,35 @@ class _Evaluador:
 
     def _expresion(self):
         """`a ?? b` returns `b` only when `a` is undefined, which is `None` here."""
-        valor = self._suma()
+        valor = self._o_logico()
         while self._mirar()[1] == "??":
             self._tomar()
-            otro = self._suma()
+            otro = self._o_logico()
             if valor is None:
                 valor = otro
+        return valor
+
+    def _o_logico(self):
+        """`a || b` is `a` when `a` is truthy and `b` otherwise: JS returns an operand.
+
+        Both operands are read even when the left one decides, which is what `??` already
+        does: an operand the reader cannot close is a gap that a branch would only hide, and
+        an unevaluated branch is not a licence to skip the reading.
+        """
+        valor = self._y_logico()
+        while self._mirar()[1] == "||":
+            self._tomar()
+            otro = self._y_logico()
+            valor = valor if _verdad(valor) else otro
+        return valor
+
+    def _y_logico(self):
+        """`a && b` is `b` when `a` is truthy and `a` otherwise -- the mirror of `||`."""
+        valor = self._suma()
+        while self._mirar()[1] == "&&":
+            self._tomar()
+            otro = self._suma()
+            valor = otro if _verdad(valor) else valor
         return valor
 
     def _suma(self):
@@ -740,6 +790,9 @@ class _Evaluador:
         return base
 
     def _unario(self):
+        if self._mirar()[1] == "!":
+            self._tomar()
+            return not _verdad(self._unario())
         if self._mirar()[1] == "-":
             self._tomar()
             return -_num(self._unario())
@@ -849,7 +902,7 @@ class _Entorno(dict):
     """Scope that resolves a constant on demand, memoised and cycle-checked."""
 
     def __init__(self, anclas: dict[str, dict], cache: dict[str, float],
-                 en_curso: set[str], mapa: dict[str, str] | None = None):
+                 en_curso: set[str], mapa: dict[str, str | None] | None = None):
         super().__init__()
         self._anclas, self._cache, self._en_curso = anclas, cache, en_curso
         self._mapa = mapa
@@ -879,7 +932,7 @@ def _miembro(valor, resto: str, completo: str):
 
 
 def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[str],
-              mapa: dict[str, str] | None = None):
+              mapa: dict[str, str | None] | None = None):
     if nombre in cache:
         return cache[nombre]
     base, _, resto = nombre.partition(".")
@@ -892,8 +945,11 @@ def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[s
         raise FuenteIlegible(f"{base} es una funcion: se evalua en puntos, no como constante")
     en_curso.add(base)
     try:
+        # The map has to cross this hop too: without it, an anchor that reads the environment
+        # and is reached from another anchor refused with `VARIABLE_NO_DECLARADA` even when
+        # the map declared it -- and the refusal looked exactly like the honest one.
         valor = _Evaluador(_tokenizar(_AS_CONST.sub("", ancla["cuerpo"])),
-                           _Entorno(anclas, cache, en_curso, mapa)).evaluar()
+                           _Entorno(anclas, cache, en_curso, mapa), mapa).evaluar()
     except FuenteIlegible as fallo:
         # The position and the quoted text belong to the constant this one reads, not to it:
         # measured, `BASE_URL = WEBAPP_URL` reported `en 50` on a 10-character body. Naming the
@@ -905,7 +961,7 @@ def _resolver(anclas: dict[str, dict], nombre: str, cache: dict, en_curso: set[s
 
 
 def evaluar(anclas: dict[str, dict], nombre: str, puntos=None,
-            cache: dict | None = None, entorno: dict[str, str] | None = None):
+            cache: dict | None = None, entorno: dict[str, str | None] | None = None):
     """Evaluate one anchor. A function is evaluated at each of `puntos`.
 
     `nombre` may be a path (`CANVAS.ancho`, `rect.top`): the base is evaluated and the
@@ -961,7 +1017,7 @@ def residuo_de_redondeo(valor: float) -> dict:
 def comparar(texto: str | None, referencia: dict, *, tolerancia: float = 0.0,
              anclas: dict[str, dict] | None = None, vivos: dict | None = None,
              backend: str = "estatico", exigir_cobertura_total: bool = False,
-             entorno: dict[str, str] | None = None) -> dict:
+             entorno: dict[str, str | None] | None = None) -> dict:
     """Compare every anchor the reference names against the value it expects.
 
     `referencia` is `{nombre: valor}` for constants or

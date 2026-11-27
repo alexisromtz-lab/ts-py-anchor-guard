@@ -528,14 +528,12 @@ class TaxonomiaTest(unittest.TestCase):
         self.assertIn("no se puede tokenizar", recuento["no_evaluables"]["T"])
 
     def test_el_simbolo_mas_largo_gana(self):
-        """`!==` is a comparison; only the leftover `!` is a boolean operator."""
+        """`!==` is a comparison and `!` alone is an operator: the longest match decides."""
         recuento = self._censo('export const A = B === "x";\n'
                               'export const C = D !== 1;\n'
-                              'export const E = F || 2;\n'
-                              'export const G = H!;\n')
+                              'export const E = F != "y";\n')
         self.assertEqual(recuento["causa_de"],
-                         {"A": "COMPARACION", "C": "COMPARACION",
-                          "E": "OPERADOR_BOOLEANO", "G": "OPERADOR_BOOLEANO"})
+                         {"A": "COMPARACION", "C": "COMPARACION", "E": "COMPARACION"})
 
     def test_el_miembro_opcional_no_es_un_ternario(self):
         """`?` is a token, so the tokenizer never sees it here: `?.` is a member access."""
@@ -555,8 +553,8 @@ class TaxonomiaTest(unittest.TestCase):
 
     def test_el_ancla_que_hereda_nombra_el_ancla_culpable(self):
         """`A = B` fails at a position inside `B`; without the prefix the cause lies about `A`."""
-        recuento = self._censo('export const A = B;\nexport const B = C || 1;\n')
-        self.assertEqual(recuento["causa_de"]["B"], "OPERADOR_BOOLEANO")
+        recuento = self._censo('export const A = B;\nexport const B = C === 1;\n')
+        self.assertEqual(recuento["causa_de"]["B"], "COMPARACION")
         self.assertEqual(recuento["causa_de"]["A"], "BLOQUEADA_POR_ANCLA")
         self.assertTrue(recuento["no_evaluables"]["A"].startswith("B: "))
 
@@ -598,7 +596,9 @@ class EntornoDeclaradoTest(unittest.TestCase):
     reach: 31 boolean operators, 8 comparisons, 4 templates, 3 member accesses, 1 arrow, and
     3 that have a second blocker behind the read (`as string`, `parseInt`, a ternary). The
     prediction said 51; that arithmetic read `causa_de`, which publishes the head of a chain
-    and not the chain.
+    and not the chain. In 0.9.4 the boolean operators are read and move 16 more -- 38 + 10 +
+    16 = 64 -- and `OperadoresBooleanosTest` pins the subalgebra that closed and the frontier
+    that did not.
     """
 
     def _censo(self, fuente: str, entorno=None):
@@ -633,29 +633,37 @@ class EntornoDeclaradoTest(unittest.TestCase):
         self.assertEqual(con["causa_de"]["D"], "PLANTILLA_LITERAL")
 
     def test_una_variable_ausente_nunca_toma_el_valor_por_defecto(self):
-        """`X || "d"` is refused at the operator, before the read: the map cannot reach it.
+        """Since 0.9.4 the operator is read, so the refusal moved to the read it names.
 
-        The map closes the environment; the fallback would need the operator act, and until
-        then the anchor stays a hole. What this pins is that it never becomes `"d"`.
+        The map closes the environment: `X || "d"` with `X` declared `""` yields `"d"`, but
+        with `X` absent from the map there is no truth value to test, so the anchor stays a
+        hole -- and `causa_de` names the variable instead of blaming the operator.
         """
         recuento = self._censo('export const A = process.env.FALTA || "d";\n',
                               entorno={"OTRA": "si"})
         self.assertEqual(recuento["evaluables"], 0)
         self.assertIn("A", recuento["con_entorno"])
-        self.assertEqual(recuento["causa_de"]["A"], "OPERADOR_BOOLEANO")
+        self.assertEqual(recuento["causa_de"]["A"], "VARIABLE_NO_DECLARADA")
+        self.assertIn("variable de entorno no declarada: FALTA",
+                      recuento["no_evaluables"]["A"])
         with self.assertRaises(FuenteIlegible):
             evaluar(extraer_anclas('export const A = process.env.FALTA || "d";\n'),
                     "A", entorno={"OTRA": "si"})
 
-    def test_el_mapa_no_resucita_lo_que_el_operador_detiene(self):
-        """The map closes the environment; what stands behind it is the next act's business."""
-        recuento = self._censo('export const A = process.env.PORT || "80";\n'
-                              'export const B = process.env.PORT ?? "80";\n',
-                              entorno={"PORT": "3000"})
-        self.assertEqual(recuento["causa_de"]["A"], "OPERADOR_BOOLEANO")
-        self.assertEqual(recuento["evaluables"], 1)
-        self.assertNotIn("B", recuento["no_evaluables"])
-        self.assertNotIn("B", recuento["con_entorno"])
+    def test_el_operador_ahora_lee_el_mapa_y_no_lo_tapa(self):
+        """0.9.4 reads `||`: a declared value wins, and `??` keeps its own rule.
+
+        `PORT="3000"` is truthy, so both operators agree here; where they part -- a declared
+        `""` -- is pinned in `OperadoresBooleanosTest`.
+        """
+        fuente = ('export const A = process.env.PORT || "80";\n'
+                  'export const B = process.env.PORT ?? "80";\n')
+        recuento = self._censo(fuente, entorno={"PORT": "3000"})
+        self.assertEqual(recuento["evaluables"], 2)
+        self.assertEqual(recuento["con_entorno"], {})
+        anclas = extraer_anclas(fuente)
+        self.assertEqual(evaluar(anclas, "A", entorno={"PORT": "3000"}), "3000")
+        self.assertEqual(evaluar(anclas, "B", entorno={"PORT": "3000"}), "3000")
 
     def test_la_forma_corchete_y_la_forma_punto_son_la_misma_lectura(self):
         recuento = self._censo('export const A = process.env["PORT"];\n'
@@ -732,3 +740,109 @@ class EntornoDeclaradoTest(unittest.TestCase):
                            "--entorno", str(mapa)])
         self.assertEqual(rc, RC_ARITY)
         self.assertIn("todavia no viaja en el manifiesto", error.getvalue())
+
+
+class OperadoresBooleanosTest(unittest.TestCase):
+    """`!`, `&&` and `||` over a closed map: JS truth, JS operands, no invented defaults.
+
+    Measured on `calcom/cal.com@ae027bb7` with its 63 variables declared: 48 -> 64 evaluables.
+    The preregistro predicted 63, and the difference names itself twice. `EMAIL_FROM_NAME` was
+    counted among the mixed bodies because a residue heuristic read its second operand
+    `APP_NAME` as an opaque identifier, when it is an anchor the reader closes. And the count
+    only reached 64 -- not the 63 of the 15 pure bodies plus that one -- after a latent defect
+    was repaired: the map did not cross the hop from one anchor to another, and the refusal
+    that resulted carried the same text and the same cause as an honest one, which is why
+    0.9.3 could not see it.
+    """
+
+    def _censo(self, fuente: str, entorno=None):
+        from ts_py_anchor_guard.anchor_oracle import censo
+        motivos: dict = {}
+        anclas = extraer_anclas(fuente, motivos=motivos)
+        return censo(anclas, motivos, entorno=entorno)
+
+    def _valor(self, cuerpo: str, entorno=None):
+        return evaluar(extraer_anclas(f"export const A = {cuerpo};\n"), "A", entorno=entorno)
+
+    def test_el_mapa_declara_la_verdad_de_un_texto(self):
+        """P14: `""` is false and `"0"` and `"false"` are true, because `process.env` is text."""
+        self.assertEqual(self._valor('process.env.V || "d"', {"V": ""}), "d")
+        self.assertEqual(self._valor('process.env.V || "d"', {"V": "0"}), "0")
+        self.assertEqual(self._valor('process.env.V || "d"', {"V": "false"}), "false")
+
+    def test_el_operador_devuelve_un_operando_y_no_un_booleano(self):
+        """`a || b` is `a` or `b` in JS; a reader that returned `true` would rewrite the text."""
+        self.assertEqual(self._valor('process.env.V || "d"', {"V": "a"}), "a")
+        self.assertEqual(self._valor('process.env.V && "z"', {"V": "a"}), "z")
+        self.assertEqual(self._valor('process.env.V && "z"', {"V": ""}), "")
+
+    def test_la_negacion_da_booleano_y_se_puede_negar_dos_veces(self):
+        self.assertIs(self._valor("!process.env.V", {"V": ""}), True)
+        self.assertIs(self._valor("!!process.env.V", {"V": "0"}), True)
+        self.assertIs(self._valor("!!process.env.V", {"V": ""}), False)
+
+    def test_la_precedencia_es_la_de_javascript(self):
+        """`&&` binds tighter than `||` and `!` tighter than both, each left-associative."""
+        self.assertEqual(self._valor('"a" || "b" && ""'), "a")
+        self.assertIs(self._valor('!"a" && ""'), False)
+        self.assertEqual(self._valor('"" || "b" || "c"'), "b")
+
+    def test_null_declarado_es_una_ausencia_y_la_ausencia_no_es_silencio(self):
+        """P15: `null` says "this deployment does not define it"; a missing key says nothing."""
+        mapa = {"V": None}
+        self.assertEqual(self._valor('process.env.V || "d"', mapa), "d")
+        self.assertEqual(self._valor('process.env.V ?? "d"', mapa), "d")
+        self.assertIs(self._valor("!process.env.V", mapa), True)
+        self.assertIs(self._valor("!!process.env.V", mapa), False)
+        with self.assertRaises(FuenteIlegible):
+            # No members of nothing. It refuses as an unbound name because the whole dotted
+            # token is one name; naming `MIEMBRO` here is the next act's business, not this.
+            self._valor("process.env.V.foo", mapa)
+        with self.assertRaises(FuenteIlegible) as fallo:
+            self._valor('process.env.V || "d"', {})
+        self.assertIn("variable de entorno no declarada: V", str(fallo.exception))
+
+    def test_el_mapa_cruza_el_salto_a_otra_ancla(self):
+        """An anchor reached from an anchor still reads the map: it is the same deployment.
+
+        0.9.3 built the inner reader without the map, so `A = BASE` failed with
+        `VARIABLE_NO_DECLARADA` on a variable the map declared -- the same message and the
+        same cause an honest refusal has, which is why nothing caught it.
+        """
+        fuente = ('export const BASE = process.env.BASE_URL || "https://d";\n'
+                  'export const A = BASE;\n')
+        mapa = {"BASE_URL": ""}
+        anclas = extraer_anclas(fuente)
+        self.assertEqual(evaluar(anclas, "A", entorno=mapa), "https://d")
+        recuento = self._censo(fuente, entorno=mapa)
+        self.assertEqual(recuento["evaluables"], 2)
+        self.assertEqual(recuento["con_entorno"], {})
+
+    def test_la_rama_que_no_se_toma_tambien_se_lee(self):
+        """Reading is eager: an operand the reader cannot close is a gap a branch would hide."""
+        with self.assertRaises(FuenteIlegible) as fallo:
+            self._valor('process.env.V || NO_DECLARADA', {"V": "a"})
+        self.assertIn("no declarado: NO_DECLARADA", str(fallo.exception))
+
+    def test_la_frontera_del_acto_no_se_mueve(self):
+        """The mixed bodies keep their second blocker: reading `||` must not read past it."""
+        fuente = ('export const A = parseInt(process.env.N || "1", 10);\n'
+                  'export const B = `x${process.env.N || "y"}`;\n'
+                  'export const C = process.env.N || Q !== "y";\n'
+                  'export const D = ensureProtocol(process.env.U || "z");\n')
+        recuento = self._censo(fuente, entorno={"N": "1", "U": "https://x"})
+        self.assertEqual(recuento["evaluables"], 0)
+        self.assertEqual(recuento["causa_de"],
+                         {"A": "FUNCION_NO_SOPORTADA", "B": "PLANTILLA_LITERAL",
+                          "C": "COMPARACION", "D": "FUNCION_NO_SOPORTADA"})
+
+    def test_el_censo_publica_las_claves_nulas_y_la_invariante_cierra(self):
+        """P16: the receipt carries the map it used, and the denominator still adds up."""
+        fuente = ('export const A = process.env.V || "d";\n'
+                  'export const B = `x${process.env.V}`;\n'
+                  'export const C = 1 + 2;\n')
+        recuento = self._censo(fuente, entorno={"V": None})
+        self.assertEqual(recuento["entorno"], {"V": None})
+        self.assertEqual(recuento["evaluables"], 2)
+        self.assertEqual(sum(recuento["por_causa"].values())
+                         + len(recuento["con_entorno"]), len(recuento["no_evaluables"]))

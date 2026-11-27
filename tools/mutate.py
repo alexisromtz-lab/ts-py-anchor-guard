@@ -304,7 +304,30 @@ MUTANTES: tuple[tuple[str, str, str, str, str], ...] = (
      "    if False:",
      "un mapa con numeros se coacciona a texto: el mapa describe un tipo que el despliegue "
      "no puede tener"),
-    # --- el manifiesto: datos que encienden compuertas ---
+    # --- los operadores booleanos: la verdad de un texto y el salto del mapa ---
+    ("ao_verdad_python", "ts_py_anchor_guard/anchor_oracle.py",
+     '    if isinstance(valor, str):\n        return valor != ""',
+     '    if isinstance(valor, str):\n        return valor not in ("", "0")',
+     "la verdad de un texto se adivina con la regla de Python: un despliegue que exporta "
+     "`DRY_RUN=0` recibe el valor por defecto"),
+    ("ao_o_logico_invertido", "ts_py_anchor_guard/anchor_oracle.py",
+     "            valor = valor if _verdad(valor) else otro",
+     "            valor = otro if _verdad(valor) else valor",
+     "`||` se comporta como `&&`: el operador devuelve el operando contrario"),
+    ("ao_mapa_salto", "ts_py_anchor_guard/anchor_oracle.py",
+     '                           _Entorno(anclas, cache, en_curso, mapa), mapa).evaluar()',
+     '                           _Entorno(anclas, cache, en_curso, mapa), None).evaluar()',
+     "el mapa no cruza el salto de una ancla a otra: el rechazo es identico al honesto y "
+     "una variable declarada se lee como hueco"),
+    ("ao_nulo_es_ausente", "ts_py_anchor_guard/anchor_oracle.py",
+     '        return self.mapa[variable]\n',
+     '        if self.mapa[variable] is None:\n'
+     '            raise FuenteIlegible(f"variable de entorno no declarada: {variable}",\n'
+     '                                 causa="VARIABLE_NO_DECLARADA")\n'
+     '        return self.mapa[variable]\n',
+     "una clave declarada `null` se lee como clave ausente: la ausencia declarada vuelve a "
+     "ser silencio"),
+
     ("mf_version_ignorada", "ts_py_anchor_guard/manifiesto.py",
      "    if version != VERSION:",
      "    if False:",

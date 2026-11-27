@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.3`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.4`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -322,6 +322,44 @@ Four decisions hold the act together, and each of them is a way to be green over
 
 The bracket form `process.env["PORT"]` and the dotted `process.env.PORT` are the same read, and a
 string that merely names a variable — `"process.env.PORT"` — is still a value.
+
+`0.9.4` reads `!`, `&&` and `||` — but only over a map that already closes the environment, and the
+order is the point: an operator over a free variable is not a function, it is a wish. With the 63
+variables of `calcom/cal.com@ae027bb7` declared, the file moves **48 → 64 of 118** (54,2 %):
+`con_entorno` 50 → 34, `estructurales` 20 → 20, and `immich@a51a4385` stays at **12 of 16**
+because none of its four refusals is an operator. The preregistro predicted 63, and the difference
+is named rather than rounded:
+
+- **The prediction missed by one, and the census says why.** Fifteen bodies whose only symbols are
+  `process.env.X`, text and an operator were predicted to move. A sixteenth moved:
+  `EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || APP_NAME`. The residue heuristic that selected
+  the fifteen classes any identifier as opaque, and `APP_NAME` is an anchor the reader closes — so
+  the sixteenth body was never mixed, and the instrument was the thing being measured.
+- **A latent defect stood between the count and its number.** `_resolver` built the inner reader
+  without the map, so `A = BASE` — where `BASE = process.env.BASE_URL || "x"` — refused
+  `VARIABLE_NO_DECLARADA` on a variable the map declared. The refusal carried the same text and the
+  same cause as an honest one, which is why `0.9.3` could not see it: a weaker reader reporting a
+  gap in its subject's own words. The map now crosses the hop, and `ao_mapa_salto` dies at the test
+  that pins it.
+- **The truth of a text is JavaScript's, written down once.** `""` is false; `"0"` and `"false"`
+  are true. A reader that borrowed Python's rule would answer `process.env.DRY_RUN || "no"` with
+  the fallback for a deployment that exported `DRY_RUN=0` — a divergence with no failing test
+  anywhere, because the test would be run with the same wrong rule.
+- **`null` is a decision; absence is silence.** A key declared `null` says the deployment does not
+  define the variable: `X || "d"` is `"d"`, `X ?? "d"` is `"d"`, `!X` is `true`, and `X.foo` is
+  still refused — there are no members of nothing. Omitting the key is a different decision and
+  stays `VARIABLE_NO_DECLARADA`. The receipt publishes the map it used, with its `null`s.
+- **Reading is eager, and that is the conservative choice.** Both operands are read even when the
+  left one decides, exactly as `??` already did: an operand the reader cannot close is a gap, and a
+  branch would only hide it. `E || !IS_SELF_HOSTED` is therefore still unpriced where `E` is a
+  value, because the second operand reads `.some(...)`.
+
+What did not move is the frontier the act declared: `parseInt(process.env.X || "1", 10)`, a
+template literal, `!==` and an unknown call each keep their second blocker, so 19 of the 20 mixed
+bodies the preregistro set aside stay unpriced — the twentieth, `EMAIL_FROM_NAME`, was never
+mixed. Naming an operator must not become a licence to read past it:
+`test_la_frontera_del_acto_no_se_mueve` is the test for that, and the suite is at 171 tests with
+four mutants over this act, all dead.
 
 ## Use as a GitHub Action
 
@@ -874,7 +912,7 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 79 mutations, 75 killed
+### What the tests would notice: 83 mutations, 79 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
 open the fixture" but "if the code were wrong, would anything go red" — so 79 one-line
@@ -981,6 +1019,13 @@ probes), each in a fresh copy, each followed by the whole suite.
   by the CLI that refuses it). Measured run: `aplicables: 79 · muertos: 75 · vivos: 4 ·
   flaky: 0 · huecos de cobertura: ninguno`, exit code `0` — the same four declared survivors
   for the fourth pass running, so a declared environment did not buy a smaller denominator.
+- **79 of 83 die now, and the eleventh pass measures the operators.** Four mutants over the act,
+  all dead by a test of their own module and none by a test of another: Python's truth for text,
+  so a deployment that exports `DRY_RUN=0` falls to the fallback (`ao_verdad_python`), `||`
+  behaving as `&&` (`ao_o_logico_invertido`), the map dropped at the hop from one anchor to
+  another (`ao_mapa_salto`) and a `null` key read back as an absent one (`ao_nulo_es_ausente`).
+  Measured run: `aplicables: 4 · muertos: 4 · vivos: 0 · flaky: 0 · huecos de cobertura: ninguno`,
+  exit code `0` — with the same four declared survivors as the four passes before it.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to
