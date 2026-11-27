@@ -35,10 +35,32 @@ class OraculoVivoTest(unittest.TestCase):
         self.assertEqual(vivos["rect.top"], [480, 500])
         self.assertEqual(vivos["rect.ancho"], [1080])
 
-    def test_un_valor_que_no_es_numero_se_conserva_como_hueco(self):
+    def test_el_texto_vivo_llega_como_cadena_y_se_compara_por_igualdad(self):
+        """`typeof v` answered "string" for every text anchor: a hole dressed as a value.
+
+        The probe has to hand back the text itself, so a `$pageview` that matches is a
+        conforming anchor and one that drifted is a named divergence.
+        """
+        fuente = _MINIMA + 'export const EVENTO = "$pageview";\n'
+        vivos, motivo = live_oracle.medir(fuente, {"EVENTO": "$pageview"})
+        self.assertEqual(motivo, "")
+        self.assertEqual(vivos["EVENTO"], ["$pageview"])
+        recibo = comparar(fuente, {"EVENTO": "$pageview"}, vivos=vivos)
+        self.assertEqual(recibo["rc"], RC_OK)
+        self.assertEqual(recibo["anclas"][0]["tipo_valor"], "texto")
+        recibo = comparar(fuente, {"EVENTO": "$pageleave"}, vivos=vivos)
+        self.assertEqual(recibo["rc"], RC_DIVERGE)
+
+    def test_el_texto_se_conserva_y_un_nombre_ausente_es_un_hueco(self):
+        """What the source returns is the measurement, including a string.
+
+        `etiqueta(1)` is `"1"` and that is a fact about the subject; `NO_EXISTE` is not in
+        the module, and the probe used to answer `typeof` — the *text* `"undefined"` — which
+        read as a value and turned a missing anchor into a green.
+        """
         vivos, _ = live_oracle.medir(_MINIMA, {"etiqueta": {"puntos": [1], "valores": [1]},
                                                "NO_EXISTE": 0})
-        self.assertEqual(vivos["etiqueta"], [None])
+        self.assertEqual(vivos["etiqueta"], ["1"])
         self.assertEqual(vivos["NO_EXISTE"], [None])
 
     def test_una_fuente_que_no_compila_es_un_motivo_no_un_cero(self):

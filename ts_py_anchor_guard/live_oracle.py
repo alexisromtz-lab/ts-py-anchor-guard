@@ -45,7 +45,7 @@ import * as motor from "./fuente.ts";
 const referencia = JSON.parse(process.argv[2]);
 const valor = (v) => {
   if (typeof v === "number") return Number.isFinite(v) ? v : String(v);
-  return typeof v;
+  return v;
 };
 const miembro = (v, camino) => {
   for (const paso of camino) v = v == null ? undefined : v[paso];
@@ -128,9 +128,12 @@ def medir(fuente: str, referencia: dict, *, nodo: tuple[str, list[str]] | None =
             crudo = json.loads(corrida.stdout)
         except json.JSONDecodeError:
             return {}, "node no devolvio JSON"
-    # A value that is not a number was named in the reference but is not measurable: it is
-    # kept as `None` so `comparar` reports the anchor instead of dropping it.
-    return ({nombre: [v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    # Text crosses the bridge as text: an event name or an error code measured by executing
+    # the source is the same evidence a number is, and dropping it to `None` would turn a
+    # renamed code into a gap. Anything else (a boolean, an object) is kept as `None` so
+    # `comparar` reports the anchor instead of dropping it.
+    return ({nombre: [v if isinstance(v, str) or (
+                          isinstance(v, (int, float)) and not isinstance(v, bool)) else None
                       for v in valores]
              for nombre, valores in crudo.items()}, "")
 
@@ -140,6 +143,7 @@ export const A = 864;
 export const CAJA = { ancho: 1080 } as const;
 export const rect = (y?: number) => ({ top: y ?? 480, ancho: CAJA.ancho });
 export const roto = (v: number) => String(v);
+export const EVENTO = "$insight_alert_opened";
 """
 
 
@@ -155,10 +159,12 @@ def _autotest() -> int:
         "A": 864, "CAJA.ancho": 1080,
         "rect.top": {"puntos": [None, 500], "valores": [480, 500]},
         "roto": {"puntos": [1], "valores": [1]},
+        "EVENTO": "$insight_alert_opened",
     }, nodo=nodo)
     if motivo:
         fallos.append(f"medir: {motivo}")
-    esperado = {"A": [864], "CAJA.ancho": [1080], "rect.top": [480, 500], "roto": [None]}
+    esperado = {"A": [864], "CAJA.ancho": [1080], "rect.top": [480, 500],
+                "roto": ["1"], "EVENTO": ["$insight_alert_opened"]}
     for nombre, valores in esperado.items():
         if vivos.get(nombre) != valores:
             fallos.append(f"{nombre}: {vivos.get(nombre)!r} != {valores!r}")
@@ -172,7 +178,7 @@ def _autotest() -> int:
         return 1
     version = subprocess.run([nodo[0], "--version"], capture_output=True,
                              text=True).stdout.strip()
-    print(f"AUTOTEST OK: 7 anclas de oraculo vivo · {version}")
+    print(f"AUTOTEST OK: 8 anclas de oraculo vivo · {version}")
     return 0
 
 

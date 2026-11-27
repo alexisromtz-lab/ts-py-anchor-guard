@@ -57,7 +57,7 @@ another from a single pair of rows or columns, at 1/50 px resolution, and separa
 ```console
 $ pip install "git+https://github.com/alexisromtz-lab/ts-py-anchor-guard"
 $ python -m ts_py_anchor_guard.anchor_oracle --self-test
-AUTOTEST OK: 33 anclas de oraculo
+AUTOTEST OK: 44 anclas de oraculo
 ```
 
 Measured on 2026-11-25 in an empty venv on Python 3.12.13: the package lands in
@@ -71,7 +71,7 @@ $ git clone https://github.com/alexisromtz-lab/ts-py-anchor-guard
 $ cd ts-py-anchor-guard && python -m ts_py_anchor_guard.anchor_oracle --self-test
 ```
 
-`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.8.1`), so a plain
+`pyproject.toml` is in place (`name = "ts-py-anchor-guard"`, version `0.9.0`), so a plain
 `pip install ts-py-anchor-guard` becomes true the moment a wheel is published — and not
 before. No dependencies. Each module is standalone, importable and has a `main()`.
 
@@ -131,8 +131,10 @@ because return paths were added.
 it was measuring. Six mutants were added over the three sites with the worst ratio of lines to
 mutants (`anchor_oracle` 92.7, `live_oracle` 74.7, `contrato_censo` 62.3); five die. The one
 that did not is now the fifth declared exemption, and its reason is a measurement rather than
-an argument: the node probe answers `typeof v`, so an exported `true` arrives as the string
-`"boolean"` and the `isinstance(v, bool)` branch it protects has no producer. The defect came
+an argument: the node probe answered `typeof v`, so an exported `true` arrived as the string
+`"boolean"` and the `isinstance(v, bool)` branch it protects had no producer. That exemption
+held for two releases and `0.9.0` falsified it — the probe returns the value, a `true` reaches
+Python as a boolean, and the mutant now dies. The defect came
 from `lo_motivo_sin_causa`: `medir()` reported `node rc 1: Node.js v24.15.0` — the last line of
 `stderr`, which is Node's version banner — while the cause, a `SyntaxError`, sat three lines
 above it. A motive that names the runner sends the reader to the wrong file. It now prefers the
@@ -209,6 +211,38 @@ invocation found `steps.<id>.outputs.rc` empty. The module's own `20` was publis
 own refusal was not, so the same code reached the caller as a number on one path and as an
 absent slot on the other. All boundary refusals now publish `rc=20` with an empty `receipt`, and
 `ci.yml` asserts both.
+
+`0.9.0` is the reader learning that **text is a value**. A declaration like
+`export const EVENTO = "paneo:fin"` was unreadable, and so was every object keyed by text, so on
+a real file the census read **13 of 72** declarations (18,1 %). It now reads **72 of 72** and
+evaluates **56** (77,8 %) — `posthog/posthog@bda26b33` `frontend/src/lib/constants.tsx`
+(77 551 B, 67), `marimo-team/marimo@906e4c2f` `frontend/src/core/constants.ts` (3),
+`langfuse/langfuse@a2cd4753` `packages/shared/src/constants.ts` (2), each count matching
+`grep -c '^export const'`. The 59 refusals were classified by hand: 31 strings, 17 comments, 4
+template literals, 2 `enum` member access — the language's, not this reader's — 1 numeric
+separator, 1 spread, and 3 with no single cause. What it cost, none of it the language's
+fault:
+
+- **The opening quote was never masked.** `_cerrar_cadena` returned the index of the character
+  after the opening quote, so every string's *body* was read as code: `"cero}"` closed a brace
+  level and `"https://…"` opened a comment on its `//`.
+- **A regex literal swallowed the file.** `/[\w'()]/gi` opened a string on its `'`, and the
+  rest of `constants.tsx` — 27 of its 67 declarations — disappeared into it. Regexes are now
+  skipped as a token, with `<` deliberately excluded from the "a regex may start here" set so
+  that a JSX closing tag is not mistaken for one.
+- **A false green at the runtime boundary.** The probe answered `typeof v` for anything that
+  was not a number, so an exported `true` crossed as the *text* `"boolean"` and a name that does
+  not exist crossed as `"undefined"` — an absent anchor compared as a string, which is a
+  measurement of nothing. The probe returns the value; `medir()` keeps a string and drops a
+  boolean, so a boolean is a hole with a motive.
+
+The tolerance does not apply to text: two strings have no distance between them, so a text row
+carries `tipo_valor: "texto"` and no `peor_rel`, and `--tolerancia` cannot turn a different
+branch name into a conforming one. `--censo` gained the denominator — `declaradas` next to
+`leidas` and `evaluables`, with the two silences named apart (`NO_LEIDA` is the reader,
+`NO_EVALUABLE` is the subset) — because a coverage figure computed from what the reader reached
+is the instrument measuring itself. The self-test grew from 33 anchors to 44. The minor moves
+because the receipt gained a value type; no exit code changed.
 
 ## Use as a GitHub Action
 
@@ -390,6 +424,19 @@ verifier:
   (`BOX.w`, `PLACAS.sundial.nativo`), and single-expression arrows — including arrow bodies
   that span lines, annotate their return type (`(v: number): boolean =>`), or return an
   object literal to be read field by field.
+- **Text is a value.** A string literal is compared by exact equality — an event name, an
+  error code, a route — and the tolerance does not apply, because two strings have no
+  distance between them. A text row carries `tipo_valor: "texto"` and no `peor_rel`, and a
+  divergence names the two strings instead of a relative error.
+- **Object keys may be text.** `{ "ancho-max": 1725, ANCHO }` resolves both as
+  `CAJA.ancho-max` and `CAJA.ANCHO`; a shorthand whose name is not declared is
+  `FuenteIlegible`, never a `0`.
+- **Numbers may carry separators.** `1_000_000` is `1000000`: the separator is syntax, not a
+  digit, and refusing it made a real `constants` file unreadable for a reason the port
+  cannot share.
+- **Comments and regex literals are not code.** A `//` inside `"https://…"` does not open a
+  comment, and a regex literal (`/[\w'()]/gi`) does not open a string on its `'` — the two
+  defects that kept the reader from reading its own subject.
 - **Calls:** `Math.floor`, `ceil`, `round`, `abs`, `sqrt`, `sign`, `min`, `max`, `pow`, and
   the constants `Math.PI` / `Math.E`.
 - **Refused, by name:** block bodies, loops, destructuring, and calls into anything not in
@@ -397,6 +444,18 @@ verifier:
   `NO_MEDIDO · ANCLA_NO_EVALUABLE` and is listed under `no_evaluables` — never a pass, and
   never an exception. A whole object literal compared against a number is refused the same
   way: name a field (`rectView.left`) and it compares.
+
+**How much of a real file that is, measured.** Three production `constants` files were run
+through `--censo` at fixed commits — `posthog/posthog@bda26b33`
+`frontend/src/lib/constants.tsx` (77 551 B), `marimo-team/marimo@906e4c2f`
+`frontend/src/core/constants.ts`, `langfuse/langfuse@a2cd4753`
+`packages/shared/src/constants.ts`. The reader returns **72 of 72** declarations
+(67 + 3 + 2, the same count `grep -c '^export const'` reports) and evaluates **56 of them,
+77,8 %**. Before strings were values it evaluated 13 of 72, and the 59 refusals were
+classified by hand: 31 strings, 17 comments, 4 template literals, 2 `enum` member access, 1
+numeric separator, 1 spread, 3 with no single cause. The first version of that census read 18,1 % of the
+subject and would have reported 100 % of its own reach — which is why `--censo` prints the
+declared count next to the read one.
 
 Precedence in the receipt: a measured divergence (`RC 1`) outranks a gap (`RC 2`), because
 a number that is wrong is a fact while a number that is unreadable is a hole in the census.
@@ -411,8 +470,17 @@ honest when the source grows:
 $ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts --censo
 CANVAS_W · const · 1080
 ...
-CENSO · 19 ancla(s) · las funciones con cuerpo de bloque y las variables locales no se leen
+NO_LEIDA onNode · funcion con cuerpo de bloque
+NO_EVALUABLE nearestNode · no se puede tokenizar en 18: ' => (Math.abs(b - v)'
+CENSO · 20 declarada(s) · 19 leida(s) (95.0%) · 18 evaluable(s) · las funciones con cuerpo de
+bloque y las variables locales no se leen
 ```
+
+The two silences are different questions and get different names: `no_leidas` is the reader
+(it never returned the declaration) and `no_evaluables` is the language (it returned it and
+this subset cannot value it — `nearestNode` is a `reduce`, refused by name in the section
+above, and the tokenizer stops before the call does). `declaradas` is the denominator, so no
+coverage figure can be computed from what the reader happened to reach.
 
 ```python
 from ts_py_anchor_guard import comparar
@@ -552,6 +620,10 @@ $ python -m ts_py_anchor_guard.anchor_oracle --fuente fixtures/engine.ts \
 CONFORME · 21 ancla(s) · 40 punto(s) · peor error absoluto 0.000e+00 · oraculo node v24.15.0
 ```
 
+Text crosses this boundary too, and only as text: the probe returns the exported value, so a
+string arrives as a string and a boolean arrives as a boolean — which `medir()` drops, because a
+`true` compared against a port's `1` would be a measurement of a coercion the engine never made.
+
 The receipt always names the backend that produced the reference values, because a number
 measured by an interpreter and a number measured by a model of that interpreter are not the
 same evidence. `--backend estatico` forces the model; `--backend node` fails with
@@ -679,7 +751,7 @@ Two boundaries are declared rather than measured, and no claim here crosses them
   the TypeScript source is wrong, both the source and the port are wrong together, and the
   verifier is silent by construction. It answers "same function", never "right function".
 
-### What the tests would notice: 60 mutations, 55 killed
+### What the tests would notice: 69 mutations, 65 killed
 
 A suite can read its fixtures and still assert nothing. The question is not "does this test
 open the fixture" but "if the code were wrong, would anything go red" — so 60 one-line
@@ -741,6 +813,22 @@ probes), each in a fresh copy, each followed by the whole suite.
   refuses to call a partial measurement complete (`mf_cobertura_sin_guardia`). Measured run of
   the ten: `aplicables: 10 · muertos: 10 · vivos: 0 · flaky: 0 · huecos de cobertura: ninguno`,
   exit code `0` — and put with the fifty of the run above, `60 · muertos: 55 · vivos: 5`.
+- **65 of 69 die now**, and the seventh pass is the first one that measured the reader that
+  learned text. Seven mutations, all dead by a test of their own module: the opening quote that
+  is not skipped, so a string's body is read as code (`ao_cadena_abre_solo`); a regex literal
+  read as a division, so it opens a string on its `'` and swallows the file
+  (`ao_regex_es_division`); the numeric separator treated as a digit, so `1_000_000` is not a
+  number (`ao_separador_no_es_digito`); the census denominator replaced by what the reader
+  happened to reach (`ao_censo_sin_denominador`, killed by the one test that asserts the
+  denominator is the sum of the reads and the named silences); tolerance applied to text, where
+  a length difference is not a distance (`ao_texto_con_tolerancia`); the probe answering
+  `typeof` again (`lo_probe_typeof`, killed by `test_el_texto_se_conserva_y_un_nombre_ausente_es_un_hueco`);
+  and `lo_bool_conforma`, which left the exemption table because the producer changed. Four of
+  the seven surface first at `ContratoTest.test_autotest_y_aridad`, which runs the module's own
+  self-test — `_FUENTE_TEXTO` is part of the fixture the release runs — and each of the four was
+  also checked against a focused test, so none of them rests on the fixture alone. Measured
+  run: `aplicables: 69 · muertos: 65 · vivos: 4 · flaky: 0 · huecos de cobertura: ninguno`,
+  exit code `0`.
 - **The harness does not mutate itself, and that is declared, not hidden.** `tools/mutate.py`
   deletes `tests/test_mutate.py` from every copy it runs, because that file asserts the shape of
   the mutation table and would "kill" any edit to it — the exact dead end this section exists to
@@ -807,10 +895,11 @@ Four rules make the report trustworthy. All four were learned by getting them wr
   so the repeat read the compiled module and the mutant became invisible. Each run now copies
   the whole tree instead of cleaning selectively.
 
-**Five mutants cannot be killed by any test, and that is the finding, not an omission.** Three
-are guards the arithmetic makes unreachable, one is a branch whose input nothing produces, and
-one is a filter the producer empties before it. No input distinguishes them from the original,
-so no test can:
+**Four mutants cannot be killed by any test, and that is the finding, not an omission.** Three
+are guards the arithmetic makes unreachable and one is a filter the producer empties before it.
+No input distinguishes them from the original, so no test can — this table was five rows until
+`0.9.0`, when the fifth (a boolean filter the probe's `typeof` made unreachable) became killable
+by changing the producer:
 
 | mutant | why no input reaches it |
 |---|---|
@@ -818,7 +907,6 @@ so no test can:
 | `curvatura <= 0` → `curvatura < 0` | `curvatura == 0` needs `c_menos + c_mas == 2*c0` with `c0` a minimum, i.e. a three-way tie, which exact integer sums can produce only by making the parabola flat everywhere — not with `_ssd` over distinct shifts |
 | allow bands with fewer than 2 samples of overlap | the `2*max_shift + 8 > min(len)` check already refuses those inputs, so the later guard is shadowed by the earlier one from every public entry point |
 | read bytecode by descriptor only on `'xb'` | measured: the interpreter opens `__pycache__` files with mode `'wb'`, so the `'xb'` arm of the filter has no producer. The observable half — that the probe does not leave bytecode behind — is pinned by `test_la_sonda_no_deja_bytecode_en_el_arbol`, which does kill the mutant that removes `-B` |
-| read a value as `null` unless it is a number, without excluding `bool` | measured: the node probe answers `typeof v` for anything that is not a number, so an exported `true` reaches Python as the string `"boolean"`. `isinstance(True, int)` is `True` here, which is why the exclusion is written; nothing the probe produces can exercise it |
 
 Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks for
 it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
@@ -827,7 +915,7 @@ it. What is not acceptable is claiming the suite covers it. It does not, and no 
 
 | exit code | meaning |
 |---|---|
-| `0` | conforming / measured and within tolerance |
+| `0` | conforming / measured and within tolerance (text: equal) |
 | `1` | diverging — the receipt names the anchor, point or cause |
 | `2` | not measured — never reported as conforming |
 | `20` | bad invocation |
@@ -837,25 +925,26 @@ Three of them — `anchor_oracle`, `subpixel_probe`, `viewport_embed` — open n
 socket while doing it; that is measured with `sys.addaudithook`, not asserted, because the
 first draft of this paragraph claimed it for all four and `live_oracle` contradicted it:
 its self-test writes `fuente.ts` and `probe.mjs` into a temporary directory and runs `node`,
-which is the whole point of the module. Twenty-four filesystem events outside `sys.prefix`,
+which is the whole point of the module. Nineteen filesystem events outside `sys.prefix`,
 against zero in the other three.
 
 The probe is not a snippet in this file, it is [`tools/audit_self_test.py`](tools/audit_self_test.py):
 
 ```bash
 $ python tools/audit_self_test.py
-anchor_oracle     0 events · AUTOTEST OK: 33 anclas de oraculo
-live_oracle      23 events · AUTOTEST OK: 7 anclas de oraculo vivo · v24.15.0
-subpixel_probe    0 events · AUTOTEST OK: 9 anclas de subpixel
-viewport_embed    0 events · AUTOTEST OK: 14 anclas de encastre
+anchor_oracle    rc=0 · 0 evento(s) de datos · AUTOTEST OK: 44 anclas de oraculo
+live_oracle      rc=0 · 19 evento(s) de datos · AUTOTEST OK: 8 anclas de oraculo vivo · v24.15.0
+subpixel_probe   rc=0 · 0 evento(s) de datos · AUTOTEST OK: 9 anclas de subpixel
+viewport_embed   rc=0 · 0 evento(s) de datos · AUTOTEST OK: 14 anclas de encastre
 $ echo $?          # 1: a module touched data I/O, which is what the table says
 ```
 
 Read the number for `live_oracle` as *nonzero*, not as a constant: it counts the writes and
 pipes of each `node` run the fixture performs, so it moves if the fixture does — the same
-tree reports 23 or 24 depending on whether a bytecode cache already existed. `0` versus
-*nonzero* is the invariant; the exact number is a property of the fixture, and
-`tests/test_audit_self_test.py` pins the former rather than the latter.
+tree reports 19 today, 23 before the string fixture was added to the probe, and 23 or 24
+depending on whether a bytecode cache already existed. `0` versus *nonzero* is the invariant;
+the exact number is a property of the fixture, and `tests/test_audit_self_test.py` pins the
+former rather than the latter.
 
 Measuring the self-test is itself a case of the problem this package exists to catch, twice
 over.

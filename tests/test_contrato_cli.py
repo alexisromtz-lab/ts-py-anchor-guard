@@ -147,17 +147,32 @@ class InsumoQueNoSePuedeMedir(unittest.TestCase):
         self.assertNotIn("null", p.stdout)
 
     @unittest.skipUnless(live_oracle.version_de_nodo(), "node >= 22.6 no disponible")
-    def test_un_ancla_que_existe_y_no_da_un_numero_tampoco_es_una_medicion(self):
+    def test_un_ancla_que_existe_y_no_da_ni_numero_ni_texto_tampoco_es_una_medicion(self):
+        """A boolean crosses as itself and the guard turns it into a hole.
+
+        Text is a value, so it prints: what a `--referencia` without values asks for is what
+        the source evaluated to. Where a number is *required* —a comparison— the judgment
+        belongs to `anchor_oracle`, and the second half of this test is that falsador.
+        """
         with tempfile.TemporaryDirectory() as caja:
-            fuente = Path(caja) / "etiqueta.ts"
-            fuente.write_text("export const etiqueta = (v: number) => String(v);\n")
+            fuente = Path(caja) / "bandera.ts"
+            fuente.write_text("export const bandera = (v: number) => v > 0;\n")
             ref = Path(caja) / "ref.json"
-            ref.write_text('{"etiqueta": {"puntos": [7]}}')
+            ref.write_text('{"bandera": {"puntos": [7]}}')
             p = correr("live_oracle", "--fuente", str(fuente), "--referencia", str(ref))
+            self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
+            self.assertIn("NO_MEDIDO · SIN_ANCLAS_LEGIBLES", p.stderr)
+
+            texto = Path(caja) / "etiqueta.ts"
+            texto.write_text("export const etiqueta = (v: number) => String(v);\n")
+            ref.write_text('{"etiqueta": 7}')
+            p = correr("anchor_oracle", "--fuente", str(texto), "--referencia", str(ref),
+                       "--backend", "node", "--json")
         self.assertEqual(p.returncode, RC_NO_MEDIDO, p.stderr)
-        self.assertIn("NO_MEDIDO · SIN_ANCLAS_LEGIBLES", p.stderr)
-        # The receipt names both causes: `medir` cannot tell a missing name from a string one.
-        self.assertIn("valor no numerico", p.stderr)
+        recibo = json.loads(p.stdout)
+        self.assertEqual(recibo["causa"], "ANCLA_NO_EVALUABLE")
+        # The motive names the shape it got instead of a number, so the caller can act.
+        self.assertIn("texto", recibo["no_evaluables"][0]["motivo"])
 
 
 class ElBordeTraduceElChoque(unittest.TestCase):

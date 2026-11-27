@@ -303,6 +303,13 @@ def _imprimir(recibo: dict) -> None:
         elif par["rc"] == RC_DIVERGE:
             for fila in par["anclas"]:
                 if not fila["ok"]:
+                    # A text anchor has no relative error, so the line names the equality
+                    # instead of printing a `peor_rel` that does not exist.
+                    if fila.get("tipo_valor") == "texto":
+                        print(f"DIVERGE {par['nombre']} · {fila['ancla']} · texto · "
+                              f"obtenido {fila['obtenido']!r} esperado "
+                              f"{fila['esperado']!r} · igualdad exacta")
+                        continue
                     print(f"DIVERGE {par['nombre']} · {fila['ancla']} · punto "
                           f"{fila['peor_punto']} · obtenido {fila['obtenido']!r} esperado "
                           f"{fila['esperado']!r} · peor_rel {fila['peor_rel']:.6g}")

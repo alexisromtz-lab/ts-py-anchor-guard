@@ -316,3 +316,134 @@ class CaidaNombradaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TextoEsUnValorTest(unittest.TestCase):
+    """A string in a real source is a value, not a hole in the reader.
+
+    Measured before this reader learned strings: 13 of 72 declarations in three production
+    files (posthog `frontend/src/lib/constants.tsx`, marimo, langfuse) were evaluable —18,1 %—
+    and 31 of the 59 silences were strings. The denominator was the reader's, not the
+    language's, so the fix is here and the number moves to 56 of 72 (77,8 %).
+    """
+
+    def test_una_cadena_con_llaves_no_desalinea_la_profundidad(self):
+        """`"cero}"` used to close a brace level and swallow the next declaration.
+
+        `_cerrar_cadena` returned the index of the opening quote, so only that one character
+        was masked: the body of every string was read as code. A `}` inside a string closed a
+        level that was never opened, and the declarations after it were reported as absent.
+        """
+        anclas = extraer_anclas("""
+            export const MENSAJE = "cero}";
+            export const DESPUES = 864;
+            export const URL = "https://ejemplo.mx/a";
+            export const OTRO = 1080;
+        """)
+        self.assertEqual(sorted(anclas), ["DESPUES", "MENSAJE", "OTRO", "URL"])
+        self.assertEqual(anclas["MENSAJE"]["cuerpo"], '"cero}"')
+        self.assertEqual(anclas["OTRO"]["cuerpo"], "1080")
+
+    def test_un_literal_de_regex_con_comilla_no_se_traga_el_resto_del_archivo(self):
+        """`/[\\w'()]/gi` opened a string on its `'` and ate 27 declarations of posthog.
+
+        Excluding `<` from the "a regex can start here" set is deliberate: `</div>` in JSX is
+        not a division, and a heuristic that guesses wrong costs a character, not a file.
+        """
+        anclas = extraer_anclas("""
+            export const LIMPIO = "x y".replace(/[\\w'()]/gi, "");
+            export const DESPUES = 480;
+        """)
+        self.assertEqual(sorted(anclas), ["DESPUES", "LIMPIO"])
+        self.assertEqual(anclas["DESPUES"]["cuerpo"], "480")
+
+    def test_un_comentario_dentro_de_una_cadena_no_abre_comentario(self):
+        """`_mascara` blanks comments and strings alike, so the census needs its own pass."""
+        anclas = extraer_anclas("""
+            export const RUTA = "a//b";
+            export const N = 2;
+        """)
+        self.assertEqual(sorted(anclas), ["N", "RUTA"])
+
+    def test_el_separador_numerico_se_lee_y_la_plantilla_es_un_hueco_nombrado(self):
+        anclas = extraer_anclas("""
+            export const MILLON = 1_000_000;
+            export const PLANTILLA = `${MILLON}px`;
+        """)
+        self.assertEqual(sorted(anclas), ["MILLON", "PLANTILLA"])
+        self.assertEqual(evaluar(anclas, "MILLON"), 1000000.0)
+
+    def test_un_objeto_con_claves_de_texto_y_shorthand_se_resuelve(self):
+        anclas = extraer_anclas("""
+            export const ANCHO = 1080;
+            export const CAJA = { "ancho-max": 1725, ANCHO, "alto": 1920 };
+        """)
+        self.assertEqual(evaluar(anclas, "CAJA.ancho-max"), 1725.0)
+        self.assertEqual(evaluar(anclas, "CAJA.ANCHO"), 1080.0)
+        self.assertEqual(evaluar(anclas, "CAJA.alto"), 1920.0)
+
+    def test_un_shorthand_sin_declaracion_es_ilegible_y_no_un_cero(self):
+        anclas = extraer_anclas("export const CAJA = { FANTASMA };\n")
+        self.assertIn("CAJA", anclas)
+        with self.assertRaises(FuenteIlegible):
+            evaluar(anclas, "CAJA")
+
+    def test_el_texto_se_compara_por_igualdad_y_la_tolerancia_no_aplica(self):
+        """A tolerance answers "how far", and two strings have no distance between them."""
+        recibo = comparar('export const EVENTO = "$a";\n', {"EVENTO": "$a"}, tolerancia=1e9)
+        self.assertEqual(recibo["rc"], RC_OK)
+        fila = recibo["anclas"][0]
+        self.assertEqual(fila["tipo_valor"], "texto")
+        self.assertNotIn("peor_rel", fila)
+        recibo = comparar('export const EVENTO = "$a";\n', {"EVENTO": "$b"}, tolerancia=1e9)
+        self.assertEqual(recibo["rc"], RC_DIVERGE)
+        fila = recibo["anclas"][0]
+        self.assertFalse(fila["ok"])
+        self.assertEqual((fila["obtenido"], fila["esperado"]), ("$a", "$b"))
+        self.assertNotIn("peor_rel", fila)
+
+    def test_la_aritmetica_sobre_un_texto_es_un_hueco_nombrado(self):
+        anclas = extraer_anclas('export const RARO = "a" + "b";\n')
+        self.assertIn("RARO", anclas)
+        with self.assertRaises(FuenteIlegible):
+            evaluar(anclas, "RARO")
+
+    def test_el_censo_publica_el_denominador_y_nombra_cada_silencio(self):
+        """`declaradas` has to be readable from the file, not inferred from the reader.
+
+        Before `--censo` the only denominator was `len(anclas)`, so a reader that skipped 27
+        declarations reported 100 % of what it had left. The two halves of the silence are
+        different questions: `no_leidas` is the reader, `no_evaluables` is the language.
+        """
+        from ts_py_anchor_guard.anchor_oracle import censo
+        fuente = """
+            export const A = 864;
+            export const Q = Math.max(1, 2);
+            export const f = (u) => { return u; };
+            export const T = `${A}px`;
+        """
+        motivos: dict = {}
+        anclas = extraer_anclas(fuente, motivos=motivos)
+        recuento = censo(anclas, motivos)
+        self.assertEqual((recuento["declaradas"], recuento["leidas"],
+                          recuento["evaluables"]), (4, 3, 2))
+        self.assertEqual(recuento["cobertura"], 0.75)
+        self.assertEqual(list(recuento["no_leidas"]), ["f"])  # a block body, never guessed
+        self.assertEqual(list(recuento["no_evaluables"]), ["T"])  # a template, out of subset
+
+    def test_la_cli_publica_el_censo_y_su_denominador(self):
+        """A coverage figure with no denominator printed is a number about the reader."""
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = pathlib.Path(caja) / "censo.ts"
+            fuente.write_text('export const A = 864;\n'
+                              'export const f = (u) => { return u; };\n')
+            with contextlib.redirect_stdout(io.StringIO()) as salida, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = main(["--fuente", str(fuente), "--censo"])
+        self.assertEqual(rc, RC_OK)
+        texto = salida.getvalue()
+        self.assertIn("CENSO · 2 declarada(s) · 1 leida(s) (50.0%)", texto)
+        self.assertIn("NO_LEIDA f ·", texto)

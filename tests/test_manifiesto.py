@@ -307,6 +307,34 @@ class ManifiestoTest(unittest.TestCase):
             self.assertEqual(main(["--manifest", str(ruta), "--fuente", "objeto.ts"]),
                              RC_ARITY)
 
+    # ---------------------------------------------------------------- texto
+
+    def test_un_texto_divergente_se_imprime_sin_error_relativo(self):
+        """A text row has no `peor_rel`, so an aggregate that assumes one prints nothing.
+
+        `EVENTO` is a real shape: `posthog` ships `"$pageview"`-style constants next to their
+        numeric ones. The receipt names the equality; a relative error there would be a unit
+        nobody declared.
+        """
+        self._escribir_fuente("codigos.ts", 'export const EVENTO = "$pageview";\n',
+                              "codigos_ok.json", {"EVENTO": "$pageview"})
+        self._escribir_fuente("codigos.ts", 'export const EVENTO = "$pageview";\n',
+                              "codigos_drift.json", {"EVENTO": "$pageleave"})
+        ruta = self._manifiesto([{"nombre": "codigos", "fuente": "codigos.ts",
+                                  "referencia": "codigos_ok.json"}], "texto-ok.json")
+        rc, recibo = self._correr(ruta)
+        self.assertEqual(rc, RC_OK)
+        self.assertEqual(recibo["pares"][0]["anclas"][0]["tipo_valor"], "texto")
+
+        ruta = self._manifiesto([{"nombre": "codigos", "fuente": "codigos.ts",
+                                  "referencia": "codigos_drift.json"}], "texto-drift.json")
+        salida = io.StringIO()
+        with contextlib.redirect_stdout(salida), contextlib.redirect_stderr(io.StringIO()):
+            rc = correr(ruta)
+        self.assertEqual(rc, RC_DIVERGE)
+        self.assertIn("DIVERGE codigos · EVENTO · texto · obtenido '$pageview' esperado "
+                      "'$pageleave' · igualdad exacta", salida.getvalue())
+
 
 _ENUM_TS = "export enum Destino { A = 1 }\nexport const K = 0.15;\n"
 
