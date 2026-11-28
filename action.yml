@@ -244,6 +244,12 @@ runs:
         # proof, and its length is the module's, not a caller's.
         if [ "$ENTRADA_SELF_TEST" = 'true' ]; then
           recibo=$(printf '%s' "$salida" | tr -d '\n')
+        elif [ -z "$salida" ]; then
+          # A module that refused before reading printed its cause on stderr and no receipt on
+          # stdout (`SIN_ORACULO_VIVO`, run 46104450819). Publishing `rc` beside an empty receipt
+          # is the honest answer; handing the empty string to the summariser published *its*
+          # refusal in place of the module's and failed the step naming the wrong subject.
+          recibo=''
         else
           recibo=$(printf '%s' "$salida" | PYTHONPATH="$GUARDA" python3 -m ts_py_anchor_guard._resumen)
           rc_resumen=$?
@@ -254,18 +260,26 @@ runs:
         # A self-test prints prose, not a receipt: labelling it json would lie in the UI.
         fence='```'
         if [ "$ENTRADA_SELF_TEST" = 'true' ]; then fence='```text'; else fence='```json'; fi
-        {
-          echo "### ts-py-anchor-guard · $ENTRADA_CHECK"
-          echo ''
-          echo "$fence"
-          printf '%s\n' "$recibo"
-          echo '```'
-          if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
+        if [ -z "$recibo" ]; then
+          {
+            echo "### ts-py-anchor-guard · $ENTRADA_CHECK"
             echo ''
-            echo "Recibo completo en \`$ENTRADA_RECEIPT_FILE\`. El resumen de arriba conserva los"
-            echo "conteos y el hallazgo; \`bytes\` mide el recibo entero."
-          fi
-        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "rc=$rc · ningun recibo en stdout: la causa esta en el log del paso."
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        else
+          {
+            echo "### ts-py-anchor-guard · $ENTRADA_CHECK"
+            echo ''
+            echo "$fence"
+            printf '%s\n' "$recibo"
+            echo '```'
+            if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
+              echo ''
+              echo "Recibo completo en \`$ENTRADA_RECEIPT_FILE\`. El resumen de arriba conserva los"
+              echo "conteos y el hallazgo; \`bytes\` mide el recibo entero."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        fi
 
         destino="${GITHUB_OUTPUT:-/dev/null}"
         printf 'rc=%s\n' "$rc" >> "$destino"

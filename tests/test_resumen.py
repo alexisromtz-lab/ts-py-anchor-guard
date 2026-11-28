@@ -1,6 +1,10 @@
 import contextlib
 import io
 import json
+import os
+import pathlib
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -90,3 +94,74 @@ class ResumenDeReciboTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+RAIZ = pathlib.Path(__file__).resolve().parent.parent
+
+# Every value `action.yml` exports. The step runs under `set -u`, so an unset one aborts it and
+# the test would measure its own environment instead of the wiring.
+ENTRADAS = (
+    "ENTRADA_CHECK", "ENTRADA_SELF_TEST", "ENTRADA_SOURCE", "ENTRADA_REFERENCE",
+    "ENTRADA_MANIFEST", "ENTRADA_BACKEND", "ENTRADA_TOLERANCE", "ENTRADA_PROFILE_A",
+    "ENTRADA_PROFILE_B", "ENTRADA_BANDS", "ENTRADA_CANVAS", "ENTRADA_WINDOW", "ENTRADA_RECT",
+    "ENTRADA_RECEIPT_FILE", "ENTRADA_ENVIRONMENT", "ENTRADA_ENV_BASE", "ENTRADA_ENV_DESTINO",
+    "ENTRADA_EXIGIR_INVARIANCIA",
+)
+
+
+def guion_del_paso() -> str:
+    """The composite's `run:` body, taken from `action.yml` rather than copied beside it."""
+    lineas = (RAIZ / "action.yml").read_text().splitlines()
+    desde = next(k for k, linea in enumerate(lineas) if linea.strip() == "run: |")
+    cuerpo = []
+    for linea in lineas[desde + 1:]:
+        if linea.strip() and not linea.startswith(" " * 8):
+            break
+        cuerpo.append(linea[8:])
+    return "\n".join(cuerpo) + "\n"
+
+
+class PasoDePublicacionTest(unittest.TestCase):
+    """The publish path, replayed as the shell runs it -- because it is bash, not Python.
+
+    Run 46104450819: a module that refuses before reading prints its cause on stderr and nothing
+    on stdout, and the step handed that empty string to the summariser. What the caller then read
+    was the summariser's `rc=2` in place of the module's, and the step failed with `rechazar`'s
+    20, naming the wrong subject. No test of `_resumen` could see it: the module was right.
+    """
+
+    def _correr(self, entradas: dict):
+        with tempfile.TemporaryDirectory() as tmp:
+            guion = pathlib.Path(tmp) / "paso.sh"
+            guion.write_text(guion_del_paso())
+            salida = pathlib.Path(tmp) / "outputs.txt"
+            resumen = pathlib.Path(tmp) / "summary.md"
+            salida.touch()
+            resumen.touch()
+            entorno = {nombre: "" for nombre in ENTRADAS}
+            entorno.update(entradas)
+            entorno.update({"GUARDA": str(RAIZ), "GITHUB_OUTPUT": str(salida),
+                            "GITHUB_STEP_SUMMARY": str(resumen), "PATH": os.environ["PATH"],
+                            "HOME": os.environ.get("HOME", tmp), "TMPDIR": tmp})
+            hecho = subprocess.run(
+                ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", str(guion)],
+                cwd=RAIZ, env=entorno, capture_output=True, text=True)
+            valores = dict(linea.split("=", 1)
+                           for linea in salida.read_text().splitlines() if "=" in linea)
+            return hecho.returncode, valores, resumen.read_text()
+
+    def test_un_modulo_que_no_publica_recibo_no_se_resume(self):
+        rc, valores, resumen = self._correr({
+            "ENTRADA_CHECK": "anchor", "ENTRADA_SOURCE": "fixtures/no_existe.ts",
+            "ENTRADA_REFERENCE": "fixtures/anchors.json", "ENTRADA_BACKEND": "estatico"})
+        self.assertEqual(rc, 2, "el paso devuelve el codigo del modulo, no el 20 del rechazo")
+        self.assertEqual(valores["rc"], "2")
+        self.assertEqual(valores["receipt"], "")
+        self.assertIn("ningun recibo en stdout", resumen)
+
+    def test_un_recibo_de_verdad_sale_en_una_linea_y_con_su_tamano(self):
+        rc, valores, resumen = self._correr({
+            "ENTRADA_CHECK": "census", "ENTRADA_SOURCE": "fixtures/engine.ts"})
+        self.assertEqual(rc, 0)
+        self.assertLessEqual(len(valores["receipt"].encode()), _resumen.LIMITE)
+        self.assertIn("```json", resumen)

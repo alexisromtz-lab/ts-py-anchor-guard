@@ -416,11 +416,21 @@ One defect of this act is worth keeping: the summary was installed and then over
 line that predated it, so the first measurement reported a 34 150-byte "summary" and the ceiling
 looked satisfied by nothing. It was caught by replaying the `run:` block as the shell actually
 runs it — `bash --noprofile --norc -e -o pipefail` — and by checking the byte count of the line
-rather than the exit code of the step. The suite is at 189 tests with ten mutants over this act,
+rather than the exit code of the step. The suite is at 191 tests with ten mutants over this act,
 each one dead by a test of its own module — `bytes` pricing the compressed object instead of the
 published line survived the first draft, because every receipt the suite fed in was canonical to
 both readings: `re_bytes_no_pesado` only dies against a receipt written the way `json.dumps` writes
 one, with the separators' spaces still in it.
+
+The second defect cost a red on `main` and is the same shape. `0.9.5` sent every stdout to the
+summariser, including the empty one a module leaves behind when it refuses before reading: on run
+46104450819, `backend: node` with no node printed `NO_MEDIDO · SIN_ORACULO_VIVO` on stderr and
+nothing on stdout, the summariser answered `rc=2` for the empty string, and `rechazar` failed the
+step with `20` — the caller read the summariser's verdict under the module's name. An empty
+receipt is not a receipt to compress: the step now publishes `rc` beside `receipt=` and says in
+the summary that the cause is on the log. `PasoDePublicacionTest` takes the `run:` body out of
+this file and executes it with `bash --noprofile --norc -e -o pipefail`, so the guard is measured
+by the shell and not by its name: with the branch removed, the test reports `20 != 2`.
 
 ## Use as a GitHub Action
 
