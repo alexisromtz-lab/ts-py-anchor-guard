@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -205,6 +206,13 @@ class DecisionPorEtapasTest(unittest.TestCase):
                          ("MUERTO", "ajeno", "suite"))
         self.assertEqual([(c[1], c[2]) for c in llamadas],
                          [("subpixel_probe", True), (None, False), (None, False)])
+        # El reloj de la fila se publica partido en sus dos fases: sumar 93 filas mezcla
+        # copiar con correr, y una suma sin fases no se puede atribuir.
+        for fase in ("segundos_copia", "segundos_suite"):
+            self.assertGreaterEqual(fila[fase], 0.0, f"{fase} sin medir")
+        self.assertLessEqual(fila["segundos_copia"] + fila["segundos_suite"],
+                             fila["segundos"] + 0.2,
+                             "cada fase se redondea sola; su suma cabe en el total")
 
     def test_la_etapa_del_dueno_y_la_suite_no_comparten_arbol(self):
         """A stage that ran already warmed its tree: the suite cannot inherit that state.
@@ -277,6 +285,40 @@ class DecisionPorEtapasTest(unittest.TestCase):
         self.assertEqual(rc, mutate.RC_NO_MEDIDO)
         self.assertIn("NO_MEDIDO", err.getvalue())
         self.assertIn("RuntimeError", err.getvalue())
+
+
+class ContadoresDelReadmeTest(unittest.TestCase):
+    """The README publishes two totals; until now nothing read them.
+
+    A number with no reader is prose, and prose drifts in silence: the suite grows and the
+    README keeps saying what it said the day it was written. Each anchor below is one
+    sentence that claims a total, and the test recomputes it -- the cases `unittest`
+    discovers, and the rows the harness ships. The anchors are counted, not just matched, so
+    a second copy of the same claim cannot disagree with the first without failing.
+    """
+
+    ANCLAS = (
+        ("pruebas", r"The suite is at \*\*(\d+) tests\*\*"),
+        ("aplicables", r"under CPython 3\.9\.6: `aplicables: (\d+) ·"),
+        ("filas_del_reloj", r"the (\d+) rows cost"),
+        ("mutaciones", r"stands at \*\*(\d+) mutations\*\*"),
+    )
+
+    def test_los_contadores_del_readme_son_los_del_arbol(self):
+        texto = (RAIZ / "README.md").read_text()
+        casos = unittest.defaultTestLoader.discover(
+            str(RAIZ / "tests"), top_level_dir=str(RAIZ)).countTestCases()
+        medidos = {"pruebas": casos, "aplicables": len(mutate.MUTANTES),
+                   "filas_del_reloj": len(mutate.MUTANTES),
+                   "mutaciones": len(mutate.MUTANTES)}
+        for clave, patron in self.ANCLAS:
+            with self.subTest(ancla=clave):
+                hallados = re.findall(patron, texto)
+                self.assertEqual(len(hallados), 1,
+                                 f"{clave}: README.md tiene {len(hallados)} anclas, no una")
+                self.assertEqual(int(hallados[0]), medidos[clave],
+                                 f"{clave}: README.md dice {hallados[0]}, el arbol mide "
+                                 f"{medidos[clave]}")
 
 
 if __name__ == "__main__":

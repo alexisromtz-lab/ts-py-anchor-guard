@@ -602,19 +602,37 @@ def _juzgar(caja: Path, mutante: tuple[str, str, str, str, str],
     dueno = MODULOS_DE_PRUEBA[sitio]
     t0 = time.time()
     fila = {"id": mid, "sitio": sitio, "motivo": motivo, "alcance": "suite"}
+    # El reloj de la fila se parte en sus dos fases aqui, no al publicarlo: sumar 93 filas
+    # mezcla copiar el arbol con correr la suite, y esa suma es un numero del README. Medir
+    # las dos fases por separado la atribuye sin mover un solo veredicto.
+    reloj = {"copia": 0.0, "suite": 0.0}
+
+    def _fase(nombre, funcion, *args, **kwargs):
+        arranque = time.time()
+        try:
+            return funcion(*args, **kwargs)
+        finally:
+            reloj[nombre] += time.time() - arranque
+
+    def _fila_final(**extra):
+        return {**fila, **extra,
+                "segundos_copia": round(reloj["copia"], 1),
+                "segundos_suite": round(reloj["suite"], 1),
+                "segundos": round(time.time() - t0, 1)}
+
     copia = caja / mid
-    no_aplica = _mutar(copia, sitio, viejo, nuevo)
+    no_aplica = _fase("copia", _mutar, copia, sitio, viejo, nuevo)
     if no_aplica:
         return {**fila, "estado": "NO_APLICABLE", "detalle": no_aplica, "alcance": ""}
 
     if not estricto:
-        rc1, err1 = _correr(copia, solo=dueno, failfast=True)
+        rc1, err1 = _fase("suite", _correr, copia, solo=dueno, failfast=True)
         if rc1 != 0:
             repeticion = caja / f"{mid}-repeticion"
-            if _mutar(repeticion, sitio, viejo, nuevo):
+            if _fase("copia", _mutar, repeticion, sitio, viejo, nuevo):
                 return {**fila, "estado": "NO_APLICABLE", "detalle": "el patron ya no aplica",
                         "alcance": "dueno"}
-            rc2, err2 = _correr(repeticion, solo=dueno, failfast=True)
+            rc2, err2 = _fase("suite", _correr, repeticion, solo=dueno, failfast=True)
             shutil.rmtree(repeticion, ignore_errors=True)
             shutil.rmtree(copia, ignore_errors=True)
             if rc2 == 0:
@@ -623,21 +641,20 @@ def _juzgar(caja: Path, mutante: tuple[str, str, str, str, str],
                 estado, detalle = "FLAKY", f"{_marca(err1)} / {_marca(err2)}"
             else:
                 estado, detalle = "MUERTO", _marca_propia(sitio, err1)
-            return {**fila, "estado": estado, "detalle": detalle, "alcance": "dueno",
-                    "veredicto": _veredicto(sitio, err1) if estado == "MUERTO" else "",
-                    "segundos": round(time.time() - t0, 1)}
+            return _fila_final(estado=estado, detalle=detalle, alcance="dueno",
+                               veredicto=_veredicto(sitio, err1) if estado == "MUERTO" else "")
 
-    if _mutar(copia, sitio, viejo, nuevo):
+    if _fase("copia", _mutar, copia, sitio, viejo, nuevo):
         return {**fila, "estado": "NO_APLICABLE", "detalle": "el patron ya no aplica"}
-    rc1, err1 = _correr(copia)
+    rc1, err1 = _fase("suite", _correr, copia)
     if rc1 == 0:
         estado, detalle = "VIVO", ""
     else:
         copia2 = caja / f"{mid}-repeticion"
-        if _mutar(copia2, sitio, viejo, nuevo):
+        if _fase("copia", _mutar, copia2, sitio, viejo, nuevo):
             estado, detalle = "NO_APLICABLE", "el patron ya no aplica"
         else:
-            rc2, err2 = _correr(copia2)
+            rc2, err2 = _fase("suite", _correr, copia2)
             if rc2 == 0:
                 estado, detalle = "FLAKY", f"{_marca(err1)} (no reproduce)"
             elif _marcas(err1) != _marcas(err2):
@@ -648,10 +665,9 @@ def _juzgar(caja: Path, mutante: tuple[str, str, str, str, str],
                 estado, detalle = "MUERTO", _marca_propia(sitio, err1)
         shutil.rmtree(copia2, ignore_errors=True)
     shutil.rmtree(copia, ignore_errors=True)
-    return {**fila, "estado": estado, "detalle": detalle,
-            "veredicto": _veredicto(sitio, err1) if estado == "MUERTO" else "",
-            "autorreferente": estado == "AUTORREFERENTE",
-            "segundos": round(time.time() - t0, 1)}
+    return _fila_final(estado=estado, detalle=detalle,
+                       veredicto=_veredicto(sitio, err1) if estado == "MUERTO" else "",
+                       autorreferente=estado == "AUTORREFERENTE")
 
 
 def _repartir(caja: Path, pendientes: list[tuple], trabajadores: int,

@@ -484,7 +484,7 @@ One number this act does not explain, and publishes instead of smoothing: the pe
 Summed, the 93 rows cost `902,4 s` under 3.9.6 and `3 334,5 s` under 3.14.8, and the suite going from
 `91,4 s` to `101,5 s` does not account for the difference. It is reported as measured, not attributed.
 
-The suite is at **198 tests**; the seven
+The suite is at **199 tests**; the seven
 that pin this act are in `tests/test_mutate.py`, and they were checked the way the harness checks
 its subjects: with the row ordering removed, the order test fails (`['sp_borde_izq', 've_sin_recorte']`
 inverted); with `as_completed` read as `futuros.items()`, it cannot fail at all, which is why that
@@ -501,6 +501,34 @@ prove a fresh one. The test now reads the sequence of acts (mutate, run, mutate,
 and asserts what the act actually claims: between the owner's run and the suite's, the tree is
 rebuilt. No byte of the package or of the harness moved, so the 93-row table above stands as
 published, and `v0.9.6` is left where it is, red, as the record of the defect.
+
+`0.9.8` gives that number a reader. A row now publishes its clock in two phases,
+`segundos_copia` and `segundos_suite`, next to the total, and
+`tests/test_mutate.py::ContadoresDelReadmeTest` recomputes the totals this file declares -- the
+cases `unittest` discovers and the rows the harness ships -- so a suite that grows without this
+file saying so fails instead of drifting.
+
+Measured, on this 8-core machine: copying the tree is between `0,0` and `0,4 s` of any row in
+every reading, so it is never the term that moves; the suite is. And the suite's wall clock moves
+with the number of workers, not with the interpreter. Four rows -- two their owner decides
+(`re_sin_techo`, `sp_borde_izq`), two that fall to the suite (`sp_sin_clamp`, `au_fd_solo_w`) --
+sum like this:
+
+| workers | 3.9.6 | 3.14.8 |
+|---|---|---|
+| 2 | `25,8 s` | `19,6 s` |
+| 4 | `38,8 s` | `47,7 s` |
+
+The same four rows are faster on 3.14.8 with two workers and slower with four: the ordering flips
+inside the sampling of one machine. The identical table re-run today, 93 rows and 4 workers, kept
+every verdict (`88` killed, `5` alive, `85` decided by their owner and `8` by the suite, `3`
+foreign kills, no coverage hole) and summed `624,2 s` in `2m51s` of wall clock, against the
+`902,4 s` published above for the same interpreter and the same workers. Nothing about the subject
+changed between the two readings, so that sum is not a property of the subject: it is wall clock
+of a shared box, taken four rows at a time. Of today's sum, `15,8 s` is copying and `606,2 s` is
+the suite. What the instrument costs per row is measured; what the sum means is now stated
+instead of left to be inferred, and the `3 334,5 s` of the 3.14.8 pass is not read as the price
+of that interpreter.
 
 ## Use as a GitHub Action
 
