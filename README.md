@@ -432,6 +432,64 @@ the summary that the cause is on the log. `PasoDePublicacionTest` takes the `run
 this file and executes it with `bash --noprofile --norc -e -o pipefail`, so the guard is measured
 by the shell and not by its name: with the branch removed, the test reports `20 != 2`.
 
+`0.9.6` changes the instrument, not the subject. `tools/mutate.py` now judges each mutant with the
+tests of the module that owns the site, and pays for the whole suite only when that module does not
+see the edit; the copies are spread over workers. No byte of the package moved, and the ten mutants
+of `0.9.5` keep their verdict: read again on two fresh copies the old way (`--estricto`), all ten
+agree on `estado`, `veredicto` and `detalle`, and `re_sin_techo` is `MUERTO [propio]` by
+`tests.test_resumen.ResumenDeReciboTest` in both readings — `116,1 s` one way, `7,2 s` the other.
+The same ten cost **18m49s** of wall clock the old way and **2m10s** the new one.
+
+- **The 300 s per mutant were waiting, not arithmetic.** The whole suite takes 125 s of wall clock
+  for 23 s of CPU on this machine, because most of it is a subprocess that has to be spawned and
+  waited for: the lever is concurrency, and threads are enough since no waiting thread holds the
+  GIL. Once the base is paid, a mutant its owner kills costs 7,2 s to 21,1 s instead of two full
+  suites, and four run at a time.
+- **The scope of a verdict is published, never implied.** `alcance: dueno` says the owning module
+  killed the mutant in its own tests under `-f`; `alcance: suite` says that module stayed green and
+  the rest of the suite had to answer. A `VIVO` is only pronounced after the whole suite has
+  agreed, so a mutant the owner cannot see is never called alive by the cheap route, and a kill by
+  another module's tests is still printed as `[ajeno]`.
+- **`-f` does not change what a kill looks like.** The first red is repeated on a second fresh copy
+  and the marks are compared as a set, with the path each copy ran in normalised out — the same two
+  rules as before, applied to the shorter run. `--estricto` keeps the previous procedure, the whole
+  suite in two fresh copies, for exactly the case where the cheap route has to be measured against
+  it.
+- **What a kill is compared on is the class, because that is what the report carries.** Both routes
+  publish `tests.test_<modulo>.<Clase>` and not the method: `unittest` writes the failing method
+  before the parenthesis and the class inside it, so the mark never sees the method name. Narrowing
+  it would change every `detalle` in the table, which is a change to the subject's published
+  evidence and not to the harness.
+- **One copy per worker, so the space is asked per worker.** The 64 MiB refusal is now multiplied
+  by the number of workers, and `--trabajadores N` defaults to `min(cpu_count, 4)`: two copies per
+  mutant are live at a time, so a machine that passes the old check with four workers would have
+  been four times over its headroom. The message names both factors.
+
+The whole table, measured with this harness under CPython 3.9.6: `aplicables: 93 · muertos: 88 ·
+vivos: 5 · flaky: 0 · huecos de cobertura: ninguno · muertos por un test ajeno: 3` — the same three
+declared foreign kills the serial passes had accumulated — in **4m03s**, with `85` rows decided by
+their own module and `8` by the suite.
+
+The same 93 under CPython 3.14.8 read `muertos: 89 · vivos: 4` in **15m12s** (`86`/`7`), and exactly
+one row moves: `au_sin_B` goes `VIVO` to `MUERTO [propio]`, killed by
+`tests.test_audit_self_test.ContratoDelProbe.test_la_sonda_no_deja_bytecode_en_el_arbol`. That is not
+drift. `au_sin_B` removes the `-B` that keeps the bytecode cold, so its reachability is a property of
+the interpreter and not of the subject: `mutate._persiste_bytecode()` already puts it in
+`INALCANZABLES` where the interpreter writes `.pyc`, and
+`tests/test_mutate.py::test_el_flag_B_solo_puede_importar_donde_el_interprete_escribe_pyc` measures
+that structurally rather than by running it. Four mutants stay alive in both readings: the three the
+README calls inmatable, and `au_fd_solo_w`.
+
+One number this act does not explain, and publishes instead of smoothing: the per-row wall clock.
+Summed, the 93 rows cost `902,4 s` under 3.9.6 and `3 334,5 s` under 3.14.8, and the suite going from
+`91,4 s` to `101,5 s` does not account for the difference. It is reported as measured, not attributed.
+
+The suite is at **198 tests**; the seven
+that pin this act are in `tests/test_mutate.py`, and they were checked the way the harness checks
+its subjects: with the row ordering removed, the order test fails (`['sp_borde_izq', 've_sin_recorte']`
+inverted); with `as_completed` read as `futuros.items()`, it cannot fail at all, which is why that
+draft was not kept.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
@@ -977,7 +1035,7 @@ measured on, and whether a reader can reproduce it from a fresh clone.
 | `2` for a missing input, `1` + `DESBORDA` for an oversized window | the same run; the receipt keys of the diverging case are compared with the conforming one | yes, same module, no network |
 | `--self-test` opens no data file and no socket, in three of four | `sys.addaudithook` around each module's `--self-test`, one process per module; events under `sys.prefix` and module loading (`.py`, `.pyc`) excluded, so what is counted is data I/O | yes, the probe ships as `tools/audit_self_test.py` and prints the events it saw |
 | `no third-party dependency`; a `main()` in each module; `--json` in three of four | AST import scan against `sys.stdlib_module_names`, plus each module's `--help` | yes, one loop over `ts_py_anchor_guard/*.py` |
-| `75` of `79` mutants killed under CPython 3.14.8, `0` flaky, `0` coverage holes; the `4` that no input reaches are declared with their reason, and a kill from another module's test is reported rather than counted (`3`, all declared) | 79 curated mutations across nine sites (five modules, the CLI, three harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 79 mutations and names the exemptions with their reason |
+| `89` of `93` mutants killed under CPython 3.14.8 and `88` of `93` under CPython 3.9.6, where the fifth survivor is the one the harness declares unreachable there, `0` flaky, `0` coverage holes; the survivors that no input reaches are declared with their reason, and a kill from another module's test is reported rather than counted (`3`, all declared) | 93 curated mutations across nine sites (six modules, the CLI, two harness probes), each in a fresh copy, every kill repeated on a second fresh copy | yes — `python3 tools/mutate.py`, which ships the 93 mutations and names the exemptions with their reason |
 | `18` of `22` contract rows measured, `4` declared with their motive — and the four move when `node` leaves the `PATH` (`3` `POR_DISENO` with it, `2` `SIN_NODO` without) while the `18` stays put | every CLI run once per row, its exit code compared with the process's, a row expecting `1` refusing a run whose stderr carries a traceback, no expectation taken from a flag's name, and a `backend` axis whose `--backend node` row changes class with the environment instead of assuming one | yes — `python3 tools/contrato_censo.py`; `ci.yml` also runs it under a filtered `PATH` |
 
 Two boundaries are declared rather than measured, and no claim here crosses them:
@@ -1145,7 +1203,7 @@ guards that only fire at the process boundary, where `tests/test_contrato_cli.py
 codes of all four modules. It is the right owner for that behaviour and the wrong word to print,
 so the number is stated here instead of being left for a reader to notice.
 
-Four rules make the report trustworthy. All four were learned by getting them wrong.
+Five rules make the report trustworthy. Four were learned by getting them wrong.
 
 - **A kill has to reproduce.** Every nonzero run is repeated on a fresh copy of the mutant. A
   mutation that fails once and passes on the second run is reported as `FLAKY`, never as
@@ -1169,6 +1227,12 @@ Four rules make the report trustworthy. All four were learned by getting them wr
   one CLI test launches an interpreter without `-B` and leaves a `__pycache__/_cli.pyc` behind,
   so the repeat read the compiled module and the mutant became invisible. Each run now copies
   the whole tree instead of cleaning selectively.
+- **The scope of a verdict is published, never implied.** A mutant that dies in the tests of the
+  module it belongs to answers "does the module that owns this notice"; one that survives them and
+  dies later answers a weaker and far more expensive question, and only the whole suite can ask
+  it. Each row now prints which of the two decided it (`dueno` / `suite`), so the two claims are
+  never read as one — and a reader who wants the old procedure has `--estricto`, which is how the
+  ten mutants of `0.9.5` were shown to keep their verdict.
 
 **Four mutants cannot be killed by any test, and that is the finding, not an omission.** Three
 are guards the arithmetic makes unreachable and one is a filter the producer empties before it.
@@ -1185,6 +1249,12 @@ by changing the producer:
 
 Keeping a guard that cannot fire is a choice: it states the invariant where a reader looks for
 it. What is not acceptable is claiming the suite covers it. It does not, and no test can.
+
+The table these passes built stands at **93 mutations** and is published above, in `0.9.6`: the
+numbers in this section are the rounds that produced it, not its current state. One of its rows
+describes a single interpreter, not both: the test named against `au_sin_B` kills that mutant only
+where the interpreter writes `.pyc`, so the 3.9.6 reading counts five survivors and the 3.14.8
+reading four.
 
 ## Contract
 

@@ -18,6 +18,12 @@ Three rules keep the answer honest:
   directories, so a report that quotes a path differs between two runs of the same failure.
   The location is normalised out before comparing, and what is compared is the whole set of
   failing tests: `A and B` against `A alone` is not a repeat.
+- **The scope of a verdict is published, never implied.** A kill is decided first inside the
+  module that owns the site, run with `-f` against two fresh copies: if the owner goes red on
+  both with the same first mark, the mutation is killed by the test that owns it, and the row
+  says `alcance: dueno`. Only a mutation the owner module does not notice pays for the whole
+  suite, which is where a `VIVO` or an `[ajeno]` verdict is decided. `--estricto` runs the
+  suite for every mutant, which is the same decision taken the expensive way.
 
 Exit code: `0` every applicable mutation was killed or declared unreachable, `1` at least one
 mutant survived, `2` something could not be measured, `20` bad invocation.
@@ -26,11 +32,13 @@ mutant survived, `2` something could not be measured, `20` bad invocation.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -39,7 +47,8 @@ RC_OK, RC_SOBREVIVE, RC_NO_MEDIDO, RC_ARITY = 0, 1, 2, 20
 # Each copy of the tree is about 1 MiB, and a mutant holds two of them at once. Below this the
 # temp filesystem starts answering `OSError: [Errno 28]` while the suite writes its own scratch
 # files, and a red that comes from the disk is indistinguishable from a red that comes from the
-# mutation: the run has to refuse before it produces verdicts it cannot pay for.
+# mutation: the run has to refuse before it produces verdicts it cannot pay for. The allowance
+# is per worker, because workers run suites side by side and the scratch is written concurrently.
 LIBRE_MINIMO = 64 * 1024 * 1024
 
 # (id, module, original text, mutated text, why the mutation matters)
@@ -507,10 +516,17 @@ def _mutar(destino_del_arbol: Path, sitio: str, viejo: str, nuevo: str) -> str:
     return ""
 
 
-def _correr(raiz: Path) -> tuple[int, str]:
-    proc = subprocess.run(
-        [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-t", "."],
-        cwd=raiz, capture_output=True, text=True, timeout=1800)
+def _correr(raiz: Path, solo: str | None = None, failfast: bool = False) -> tuple[int, str]:
+    """Corre la suite en `raiz`, o solo el modulo `solo` cuando se nombra.
+
+    `failfast` corta en el primer fallo: se usa en la etapa del dueno, donde lo que se afirma es
+    "el test que posee el sitio mata al mutante", y el primer fallo de ese modulo ya lo afirma.
+    """
+    orden = [sys.executable, "-B", "-m", "unittest"]
+    if failfast:
+        orden.append("-f")
+    orden += [f"tests.test_{solo}"] if solo else ["discover", "-s", "tests", "-t", "."]
+    proc = subprocess.run(orden, cwd=raiz, capture_output=True, text=True, timeout=1800)
     # Donde vive la copia es una entrada de la corrida, no una observacion: sin esto, dos
     # corridas que fallan el mismo test difieren en la ruta temporal y parecen no reproducir.
     err = (proc.stderr or "").strip()
@@ -520,7 +536,11 @@ def _correr(raiz: Path) -> tuple[int, str]:
 
 
 def _marcas(err: str) -> tuple[str, ...]:
-    """Todas las rutas `tests.test_x.Clase.test_y` que fallaron, en orden.
+    """Todas las rutas `tests.test_x.Clase` que fallaron, en orden.
+
+    A nivel de clase y no de metodo: `unittest` escribe el metodo antes del parentesis y la
+    clase dentro, asi que el nombre del metodo no llega a la marca. Es la misma granularidad
+    en las dos etapas, y por eso las dos lecturas se pueden comparar.
 
     Se comparan las dos corridas por esta lista y no por el primer fallo: dos corridas que
     fallan A y B, y A sola, no reprodujeron el mismo hecho aunque empiecen igual.
@@ -568,12 +588,116 @@ def _veredicto(sitio: str, err: str) -> str:
     return "propio" if any(m.startswith(esperado) for m in marcas) else "ajeno"
 
 
+def _juzgar(caja: Path, mutante: tuple[str, str, str, str, str],
+            estricto: bool = False) -> dict:
+    """Decide un mutante en su propia caja y devuelve su fila.
+
+    Dos etapas. La primera corre solo el modulo dueno, con `-f`, sobre dos copias frescas: si
+    ambas se ponen rojas con la misma marca, el mutante esta muerto por el test que lo posee y
+    la suite entera no puede agregar nada a esa afirmacion. Si el dueno pasa, el mutante es
+    invisible para quien lo posee, y ahi si hace falta la suite: es la unica corrida que puede
+    decir `VIVO` (nadie lo mata) o `[ajeno]` (lo mata un test que no es suyo).
+    """
+    mid, sitio, viejo, nuevo, motivo = mutante
+    dueno = MODULOS_DE_PRUEBA[sitio]
+    t0 = time.time()
+    fila = {"id": mid, "sitio": sitio, "motivo": motivo, "alcance": "suite"}
+    copia = caja / mid
+    no_aplica = _mutar(copia, sitio, viejo, nuevo)
+    if no_aplica:
+        return {**fila, "estado": "NO_APLICABLE", "detalle": no_aplica, "alcance": ""}
+
+    if not estricto:
+        rc1, err1 = _correr(copia, solo=dueno, failfast=True)
+        if rc1 != 0:
+            repeticion = caja / f"{mid}-repeticion"
+            if _mutar(repeticion, sitio, viejo, nuevo):
+                return {**fila, "estado": "NO_APLICABLE", "detalle": "el patron ya no aplica",
+                        "alcance": "dueno"}
+            rc2, err2 = _correr(repeticion, solo=dueno, failfast=True)
+            shutil.rmtree(repeticion, ignore_errors=True)
+            shutil.rmtree(copia, ignore_errors=True)
+            if rc2 == 0:
+                estado, detalle = "FLAKY", f"{_marca(err1)} (no reproduce)"
+            elif _marcas(err1) != _marcas(err2):
+                estado, detalle = "FLAKY", f"{_marca(err1)} / {_marca(err2)}"
+            else:
+                estado, detalle = "MUERTO", _marca_propia(sitio, err1)
+            return {**fila, "estado": estado, "detalle": detalle, "alcance": "dueno",
+                    "veredicto": _veredicto(sitio, err1) if estado == "MUERTO" else "",
+                    "segundos": round(time.time() - t0, 1)}
+
+    if _mutar(copia, sitio, viejo, nuevo):
+        return {**fila, "estado": "NO_APLICABLE", "detalle": "el patron ya no aplica"}
+    rc1, err1 = _correr(copia)
+    if rc1 == 0:
+        estado, detalle = "VIVO", ""
+    else:
+        copia2 = caja / f"{mid}-repeticion"
+        if _mutar(copia2, sitio, viejo, nuevo):
+            estado, detalle = "NO_APLICABLE", "el patron ya no aplica"
+        else:
+            rc2, err2 = _correr(copia2)
+            if rc2 == 0:
+                estado, detalle = "FLAKY", f"{_marca(err1)} (no reproduce)"
+            elif _marcas(err1) != _marcas(err2):
+                estado, detalle = "FLAKY", f"{_marca(err1)} / {_marca(err2)}"
+            elif any(m.startswith("tests.test_mutate.") for m in _marcas(err1)):
+                estado, detalle = "AUTORREFERENTE", _marca(err1)
+            else:
+                estado, detalle = "MUERTO", _marca_propia(sitio, err1)
+        shutil.rmtree(copia2, ignore_errors=True)
+    shutil.rmtree(copia, ignore_errors=True)
+    return {**fila, "estado": estado, "detalle": detalle,
+            "veredicto": _veredicto(sitio, err1) if estado == "MUERTO" else "",
+            "autorreferente": estado == "AUTORREFERENTE",
+            "segundos": round(time.time() - t0, 1)}
+
+
+def _repartir(caja: Path, pendientes: list[tuple], trabajadores: int,
+              estricto: bool) -> tuple[list[dict], list[dict]]:
+    """Corre los mutantes en paralelo y devuelve las filas en el orden de la tabla.
+
+    El trabajo es esperar procesos, no calcular: los trabajadores son hebras porque cada uno
+    esta bloqueado en un `subprocess.run`. Una caja por mutante, asi que ninguno ve el arbol
+    que otro entibio. El orden de las filas es el de la tabla y no el de terminacion: un
+    reporte que cambia de orden entre corridas es un reporte que no se puede comparar.
+    """
+    filas, rotos = {}, {}
+    with ThreadPoolExecutor(max_workers=trabajadores) as piscina:
+        futuros = {piscina.submit(_juzgar, caja, m, estricto): m[0] for m in pendientes}
+        for futuro in as_completed(futuros):
+            mid = futuros[futuro]
+            try:
+                filas[mid] = futuro.result()
+            except Exception as fallo:  # noqa: BLE001 -- se publica como NO_MEDIDO, no se traga
+                rotos[mid] = f"{type(fallo).__name__}: {fallo}"
+    ordenadas = [filas[m[0]] for m in pendientes if m[0] in filas]
+    return ordenadas, [{"id": k, "detalle": v} for k, v in rotos.items()]
+
+
 def main(argv: list[str]) -> int:
-    solo = {a for a in argv if not a.startswith("-")}
-    como_json = "--json" in argv
-    if any(a.startswith("-") and a != "--json" for a in argv):
-        print("uso: mutate.py [ID ...] [--json]", file=sys.stderr)
-        return RC_ARITY
+    solo, como_json, estricto, trabajadores = set(), False, False, 0
+    resto = list(argv)
+    while resto:
+        arg = resto.pop(0)
+        if arg == "--json":
+            como_json = True
+        elif arg == "--estricto":
+            estricto = True
+        elif arg == "--trabajadores":
+            if not resto or not resto[0].isdigit() or int(resto[0]) < 1:
+                print("uso: mutate.py [ID ...] [--json] [--estricto] [--trabajadores N]",
+                      file=sys.stderr)
+                return RC_ARITY
+            trabajadores = int(resto.pop(0))
+        elif arg.startswith("-"):
+            print("uso: mutate.py [ID ...] [--json] [--estricto] [--trabajadores N]",
+                  file=sys.stderr)
+            return RC_ARITY
+        else:
+            solo.add(arg)
+    trabajadores = trabajadores or min(os.cpu_count() or 1, 4)
     desconocidos = solo - {m[0] for m in MUTANTES}
     if desconocidos:
         print(f"mutante desconocido: {', '.join(sorted(desconocidos))}", file=sys.stderr)
@@ -581,11 +705,13 @@ def main(argv: list[str]) -> int:
 
     with tempfile.TemporaryDirectory(prefix="mut-") as tmp:
         libre = _libre(Path(tmp))
-        if libre is None or libre < LIBRE_MINIMO:
+        necesario = LIBRE_MINIMO * trabajadores
+        if libre is None or libre < necesario:
             cuanto = "NO_MEDIDO" if libre is None else f"{libre // (1024 * 1024)} MiB"
             print(f"NO_MEDIDO · el disco temporal tiene {cuanto} y la corrida necesita "
-                  f"{LIBRE_MINIMO // (1024 * 1024)} MiB: una suite sin sitio produce rojos que "
-                  f"no son del mutante", file=sys.stderr)
+                  f"{necesario // (1024 * 1024)} MiB ({trabajadores} trabajador(es) x "
+                  f"{LIBRE_MINIMO // (1024 * 1024)} MiB): una suite sin sitio produce rojos "
+                  f"que no son del mutante", file=sys.stderr)
             return RC_NO_MEDIDO
         base = Path(tmp) / "base"
         _copiar(base)
@@ -593,42 +719,14 @@ def main(argv: list[str]) -> int:
         if rc != 0:
             print(f"NO_MEDIDO · la base sin mutar no esta verde: {err[-400:]}", file=sys.stderr)
             return RC_NO_MEDIDO
+        shutil.rmtree(base, ignore_errors=True)
 
-        filas = []
-        for mid, sitio, viejo, nuevo, motivo in MUTANTES:
-            if solo and mid not in solo:
-                continue
-            copia = Path(tmp) / mid
-            no_aplica = _mutar(copia, sitio, viejo, nuevo)
-            if no_aplica:
-                filas.append({"id": mid, "estado": "NO_APLICABLE", "detalle": no_aplica,
-                              "sitio": sitio, "motivo": motivo})
-                continue
-            t0 = time.time()
-            rc1, err1 = _correr(copia)
-            if rc1 == 0:
-                estado, detalle = "VIVO", ""
-            else:
-                copia2 = Path(tmp) / f"{mid}-repeticion"
-                if _mutar(copia2, sitio, viejo, nuevo):
-                    estado, detalle = "NO_APLICABLE", "el patron ya no aplica"
-                else:
-                    rc2, err2 = _correr(copia2)
-                    if rc2 == 0:
-                        estado, detalle = "FLAKY", f"{_marca(err1)} (no reproduce)"
-                    elif _marcas(err1) != _marcas(err2):
-                        estado, detalle = "FLAKY", f"{_marca(err1)} / {_marca(err2)}"
-                    elif any(m.startswith("tests.test_mutate.") for m in _marcas(err1)):
-                        estado, detalle = "AUTORREFERENTE", _marca(err1)
-                    else:
-                        estado, detalle = "MUERTO", _marca_propia(sitio, err1)
-                shutil.rmtree(copia2, ignore_errors=True)
-            filas.append({"id": mid, "estado": estado, "detalle": detalle,
-                          "sitio": sitio, "motivo": motivo,
-                          "veredicto": _veredicto(sitio, err1) if estado == "MUERTO" else "",
-                          "autorreferente": estado == "AUTORREFERENTE",
-                          "segundos": round(time.time() - t0, 1)})
-            shutil.rmtree(copia)
+        pendientes = [m for m in MUTANTES if not solo or m[0] in solo]
+        filas, rotos = _repartir(Path(tmp), pendientes, trabajadores, estricto)
+        if rotos:
+            print(f"NO_MEDIDO · el arnes no pudo juzgar {', '.join(r['id'] for r in rotos)}: "
+                  f"{rotos[0]['detalle']}", file=sys.stderr)
+            return RC_NO_MEDIDO
 
     vivos = [f for f in filas if f["estado"] == "VIVO"]
     flojos = [f for f in filas if f["estado"] == "FLAKY"]
@@ -639,18 +737,24 @@ def main(argv: list[str]) -> int:
     if como_json:
         print(json.dumps({"filas": filas, "vivos": [f["id"] for f in vivos],
                           "huecos": huecos, "ajenos": ajenos,
+                          "trabajadores": trabajadores, "estricto": estricto,
                           "inalcanzables": sorted(INALCANZABLES)},
                          indent=1, ensure_ascii=False))
     else:
         for f in filas:
             extra = f" [{f['veredicto']}]" if f["veredicto"] else ""
-            print(f"{f['id']:22} {f['estado']:12} {f['detalle']}{extra}")
+            alcance = f" ({f['alcance']})" if f["alcance"] else ""
+            print(f"{f['id']:22} {f['estado']:12} {f['detalle']}{extra}{alcance}")
         print(f"\naplicables: {len(aplicables)} · muertos: "
               f"{len(aplicables) - len(vivos) - len(flojos)} · vivos: {len(vivos)} · "
               f"flaky: {len(flojos)}")
         print(f"inalcanzables declarados: {', '.join(sorted(INALCANZABLES))}")
         print(f"huecos de cobertura: {', '.join(huecos) if huecos else 'ninguno'}")
         print(f"muertos por un test ajeno: {', '.join(ajenos) if ajenos else 'ninguno'}")
+        por_dueno = sum(1 for f in filas if f["alcance"] == "dueno")
+        por_suite = sum(1 for f in filas if f["alcance"] == "suite")
+        print(f"alcance: {por_dueno} decididos por su modulo dueno · "
+              f"{por_suite} por la suite · {trabajadores} trabajador(es)")
 
     autorref = [f["id"] for f in filas if f["estado"] == "AUTORREFERENTE"]
     if autorref:

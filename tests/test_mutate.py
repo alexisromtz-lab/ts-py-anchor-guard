@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -148,6 +149,116 @@ class VeredictoTest(unittest.TestCase):
                                            "FAIL: t (tests.test_ajeno.C.t)\n"
                                            "FAIL: u (tests.test_subpixel_probe.C.u)"),
                          "propio")
+
+
+class DecisionPorEtapasTest(unittest.TestCase):
+    """The scope of a verdict is published, so a cheap decision has to be a named one.
+
+    Stage one runs only the module that owns the site, with `-f`, over two fresh copies. If that
+    module goes red both times, the whole suite cannot add anything to "the test that owns it
+    killed it", and paying 125 s per mutant for that sentence is what made the table
+    uncertifiable. Only a mutation its owner does not notice reaches the suite.
+    """
+
+    MUTANTE = ("sp_borde_izq", "ts_py_anchor_guard/subpixel_probe.py",
+               "    if mejor in (-max_shift, max_shift):", "    if mejor == max_shift:",
+               "el borde izquierdo de la ventana de busqueda")
+    OTRO = ("ve_sin_recorte", "ts_py_anchor_guard/viewport_embed.py",
+            "    elif not dentro:", "    elif False:", "la causa RECORTE")
+    # La forma que `unittest` imprime de verdad: el metodo antes del parentesis, la clase
+    # dentro, y por eso la marca nunca llega al metodo.
+    PROPIA = "FAIL: test_x (tests.test_subpixel_probe.FaseTest)"
+    AJENA = "FAIL: test_y (tests.test_anchor_oracle.AnclasTest)"
+
+    def _falso(self, respuestas, huellas=None):
+        """`_correr` que apunta con que alcance se le llamo y responde de una lista."""
+        llamadas = []
+
+        def correr(raiz, solo=None, failfast=False):
+            llamadas.append((Path(raiz).name, solo, failfast))
+            if huellas is not None:
+                huellas.append((raiz / self.MUTANTE[1]).stat().st_ino)
+            return respuestas[len(llamadas) - 1]
+
+        return llamadas, correr
+
+    def _caja(self):
+        caja = tempfile.TemporaryDirectory(prefix="etapas-")
+        self.addCleanup(caja.cleanup)
+        return Path(caja.name)
+
+    def test_el_dueno_que_mata_dos_veces_no_paga_la_suite(self):
+        llamadas, correr = self._falso([(1, self.PROPIA), (1, self.PROPIA)])
+        with mock.patch.object(mutate, "_correr", correr):
+            fila = mutate._juzgar(self._caja(), self.MUTANTE)
+        self.assertEqual(fila["estado"], "MUERTO")
+        self.assertEqual(fila["alcance"], "dueno")
+        self.assertEqual(fila["veredicto"], "propio")
+        self.assertEqual(fila["detalle"], "tests.test_subpixel_probe.FaseTest")
+        self.assertEqual(llamadas, [(self.MUTANTE[0], "subpixel_probe", True),
+                                    (f"{self.MUTANTE[0]}-repeticion", "subpixel_probe", True)],
+                         "la etapa del dueno es la unica que corre, y corre dos veces")
+
+    def test_un_dueno_que_pasa_entrega_la_decision_a_la_suite(self):
+        llamadas, correr = self._falso([(0, ""), (1, self.AJENA), (1, self.AJENA)])
+        with mock.patch.object(mutate, "_correr", correr):
+            fila = mutate._juzgar(self._caja(), self.MUTANTE)
+        self.assertEqual((fila["estado"], fila["veredicto"], fila["alcance"]),
+                         ("MUERTO", "ajeno", "suite"))
+        self.assertEqual([(c[1], c[2]) for c in llamadas],
+                         [("subpixel_probe", True), (None, False), (None, False)])
+
+    def test_la_etapa_del_dueno_y_la_suite_no_comparten_copia(self):
+        """A stage that ran already warmed its tree: the suite has to start from a fresh one."""
+        huellas = []
+        _, correr = self._falso([(0, ""), (1, self.AJENA), (1, self.AJENA)], huellas)
+        with mock.patch.object(mutate, "_correr", correr):
+            mutate._juzgar(self._caja(), self.MUTANTE)
+        self.assertEqual(len(huellas), 3)
+        self.assertEqual(len(set(huellas)), 3, f"copias repetidas: {huellas}")
+
+    def test_estricto_no_mira_al_dueno(self):
+        llamadas, correr = self._falso([(0, "")])
+        with mock.patch.object(mutate, "_correr", correr):
+            fila = mutate._juzgar(self._caja(), self.MUTANTE, estricto=True)
+        self.assertEqual((fila["estado"], fila["alcance"]), ("VIVO", "suite"))
+        self.assertEqual(llamadas, [(self.MUTANTE[0], None, False)])
+
+    def test_el_orden_de_las_filas_es_el_de_la_tabla_y_no_el_de_terminacion(self):
+        """A report that changes order between runs is a report that cannot be compared."""
+        caja = self._caja()
+
+        def correr(raiz, solo=None, failfast=False):
+            time.sleep(0.6 if Path(raiz).name == self.MUTANTE[0] else 0)
+            return 0, ""
+
+        with mock.patch.object(mutate, "_correr", correr):
+            filas, rotos = mutate._repartir(caja, [self.MUTANTE, self.OTRO], 2, False)
+        self.assertEqual(rotos, [])
+        self.assertEqual([f["id"] for f in filas], [self.MUTANTE[0], self.OTRO[0]])
+
+    def test_el_espacio_se_pide_por_trabajador(self):
+        """Workers run suites side by side, so the scratch each one needs is needed at once."""
+        poco = shutil.disk_usage(".")._replace(free=mutate.LIBRE_MINIMO * 2 - 1)
+        with mock.patch.object(mutate.shutil, "disk_usage", return_value=poco), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            rc = mutate.main(["sp_borde_izq", "--trabajadores", "2"])
+        self.assertEqual(rc, mutate.RC_NO_MEDIDO)
+        self.assertIn("128 MiB", err.getvalue())
+        self.assertIn("2 trabajador", err.getvalue())
+
+    def test_un_trabajador_que_revienta_no_deja_filas_sin_juez(self):
+        def correr(raiz, solo=None, failfast=False):
+            if Path(raiz).name == "base":
+                return 0, ""
+            raise RuntimeError("el disco dijo no")
+
+        with mock.patch.object(mutate, "_correr", correr), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            rc = mutate.main(["sp_borde_izq", "--trabajadores", "1"])
+        self.assertEqual(rc, mutate.RC_NO_MEDIDO)
+        self.assertIn("NO_MEDIDO", err.getvalue())
+        self.assertIn("RuntimeError", err.getvalue())
 
 
 if __name__ == "__main__":
