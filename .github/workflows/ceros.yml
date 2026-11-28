@@ -1,0 +1,35 @@
+# La compuerta vive en frontera-runner y se referencia por pin: aqui no se copia.
+# No sustituye a ci.yml, que prueba el ancla; esto mide otra cosa: si el PR agrega un
+# cero implicito —un `.get(clave, 0)`— que pueda leerse como valor medido cuando en
+# realidad es un valor por defecto.
+name: ceros
+
+# Un solo disparador: la base de un PR tiene sha; un dispatch no, y una compuerta que no
+# sabe contra que resta no publica un veredicto, publica una conjetura.
+on:
+  pull_request:
+
+jobs:
+  ceros:
+    uses: alexisromtz-lab/frontera-runner/.github/workflows/reusable-ceros.yml@v0.2.2
+    with:
+      # Las tres declaraciones que hoy agotan el arbol, una expresion exacta por linea
+      # (`permitir`, y no `permitidos`, porque llevan coma y `permitidos` se parte por
+      # comas). Cada una se puede discutir leyendo la linea que nombra; ninguna tapa una
+      # clase entera de lecturas.
+      #
+      # 1. `por_causa.get(causa, 0)` (anchor_oracle.py:479) es un contador:
+      #    `por_causa[causa] = por_causa.get(causa, 0) + 1`, y ahi el cero es el neutro
+      #    de la suma, no una medicion. La clave no es literal, asi que solo se puede
+      #    nombrar la linea entera.
+      # 2. `viajadas.get('_resto', 0)` (tests/test_resumen.py:52) cuenta las filas que
+      #    el resumen no mostro: ausente significa que no sobro ninguna.
+      # 3. `par.get('tolerancia', 0.0)` (manifiesto.py:126) es un default de politica,
+      #    no un dato: un manifiesto que no declara tolerancia exige coincidencia
+      #    exacta, que es el valor mas estricto posible y por eso el seguro.
+      #
+      # Cualquier cero NUEVO —otra clave, otra linea, otro sujeto— sigue en rojo.
+      permitir: |
+        por_causa.get(causa, 0)
+        viajadas.get('_resto', 0)
+        par.get('tolerancia', 0.0)
