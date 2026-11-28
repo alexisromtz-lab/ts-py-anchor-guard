@@ -490,6 +490,18 @@ its subjects: with the row ordering removed, the order test fails (`['sp_borde_i
 inverted); with `as_completed` read as `futuros.items()`, it cannot fail at all, which is why that
 draft was not kept.
 
+`0.9.7` fixes one test of that act and nothing else. `v0.9.6` left `main` red on run 46157299976:
+`test_la_etapa_del_dueno_y_la_suite_no_comparten_copia` read the inode of the mutated file at each
+of the three runs and asked for three different numbers, and under 3.14 two of them came back equal
+(`[4785326, 4785326, 4785379]`). The harness was right and the litmus was wrong: the suite runs on
+the **same path** as the owner's stage, and `_mutar` re-copies the tree into it, so the file that
+lands there takes the inode number the system has just freed. An inode is state of the filesystem,
+not of the object — a repeated one does not prove a repeated copy, and a distinct one does not
+prove a fresh one. The test now reads the sequence of acts (mutate, run, mutate, run, mutate, run)
+and asserts what the act actually claims: between the owner's run and the suite's, the tree is
+rebuilt. No byte of the package or of the harness moved, so the 93-row table above stands as
+published, and `v0.9.6` is left where it is, red, as the record of the defect.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,

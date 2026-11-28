@@ -170,14 +170,12 @@ class DecisionPorEtapasTest(unittest.TestCase):
     PROPIA = "FAIL: test_x (tests.test_subpixel_probe.FaseTest)"
     AJENA = "FAIL: test_y (tests.test_anchor_oracle.AnclasTest)"
 
-    def _falso(self, respuestas, huellas=None):
+    def _falso(self, respuestas):
         """`_correr` que apunta con que alcance se le llamo y responde de una lista."""
         llamadas = []
 
         def correr(raiz, solo=None, failfast=False):
             llamadas.append((Path(raiz).name, solo, failfast))
-            if huellas is not None:
-                huellas.append((raiz / self.MUTANTE[1]).stat().st_ino)
             return respuestas[len(llamadas) - 1]
 
         return llamadas, correr
@@ -208,14 +206,34 @@ class DecisionPorEtapasTest(unittest.TestCase):
         self.assertEqual([(c[1], c[2]) for c in llamadas],
                          [("subpixel_probe", True), (None, False), (None, False)])
 
-    def test_la_etapa_del_dueno_y_la_suite_no_comparten_copia(self):
-        """A stage that ran already warmed its tree: the suite has to start from a fresh one."""
-        huellas = []
-        _, correr = self._falso([(0, ""), (1, self.AJENA), (1, self.AJENA)], huellas)
-        with mock.patch.object(mutate, "_correr", correr):
-            mutate._juzgar(self._caja(), self.MUTANTE)
-        self.assertEqual(len(huellas), 3)
-        self.assertEqual(len(set(huellas)), 3, f"copias repetidas: {huellas}")
+    def test_la_etapa_del_dueno_y_la_suite_no_comparten_arbol(self):
+        """A stage that ran already warmed its tree: the suite cannot inherit that state.
+
+        Se mide sobre la secuencia de actos y no sobre el inodo del fichero. El inodo no es
+        estado del objeto: la copia se rehace en el mismo camino, y el sistema entrega al
+        fichero nuevo el numero que acaba de liberar el viejo. Medido asi, un inodo repetido
+        no prueba una copia repetida, y uno distinto tampoco prueba una copia nueva.
+        """
+        actos = []
+
+        def mutar(destino, sitio, viejo, nuevo):
+            actos.append(f"mutar:{Path(destino).name}")
+            return original_mutar(destino, sitio, viejo, nuevo)
+
+        def correr(raiz, solo=None, failfast=False):
+            actos.append(f"correr:{Path(raiz).name}")
+            return (0, "") if len(actos) == 2 else (1, self.AJENA)
+
+        original_mutar = mutate._mutar
+        with mock.patch.object(mutate, "_mutar", mutar), \
+                mock.patch.object(mutate, "_correr", correr):
+            fila = mutate._juzgar(self._caja(), self.MUTANTE)
+        self.assertEqual((fila["estado"], fila["alcance"]), ("MUERTO", "suite"))
+        self.assertEqual(actos, [f"mutar:{self.MUTANTE[0]}", f"correr:{self.MUTANTE[0]}",
+                                 f"mutar:{self.MUTANTE[0]}", f"correr:{self.MUTANTE[0]}",
+                                 f"mutar:{self.MUTANTE[0]}-repeticion",
+                                 f"correr:{self.MUTANTE[0]}-repeticion"],
+                         "entre la etapa del dueno y la de la suite el arbol se rehace")
 
     def test_estricto_no_mira_al_dueno(self):
         llamadas, correr = self._falso([(0, "")])
