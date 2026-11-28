@@ -484,7 +484,7 @@ One number this act does not explain, and publishes instead of smoothing: the pe
 Summed, the 93 rows cost `902,4 s` under 3.9.6 and `3 334,5 s` under 3.14.8, and the suite going from
 `91,4 s` to `101,5 s` does not account for the difference. It is reported as measured, not attributed.
 
-The suite is at **199 tests**; the seven
+The suite is at **204 tests**; the seven
 that pin this act are in `tests/test_mutate.py`, and they were checked the way the harness checks
 its subjects: with the row ordering removed, the order test fails (`['sp_borde_izq', 've_sin_recorte']`
 inverted); with `as_completed` read as `futuros.items()`, it cannot fail at all, which is why that
@@ -664,11 +664,14 @@ of the action. Run `45848898559` on `75da161` supersedes it as the current witne
 six node-free steps added, and the verdicts cited in the section above.
 
 **Pin a tag or a sha, never `main`.** A tag is cut only on a commit whose `action` job came back
-green, which is why this file does not list its own tags — that sentence would go stale the
-instant one is cut. Ask `git ls-remote --tags` instead.
+green. The exact pin below is not prose that can rot: `tests/test_readme.py` reds CI the moment it
+disagrees with `pyproject.toml`, and the same guard requires every spelling of the major pointer
+(`v`, `v0`) to resolve to the commit that `v<version>` names — the drift that left `v0` six minors
+behind. Newest tags: `git ls-remote --tags`.
 
 ```yaml
-uses: alexisromtz-lab/ts-py-anchor-guard@v0
+uses: alexisromtz-lab/ts-py-anchor-guard@v0.9.8   # exact: the tree this file measured
+# uses: alexisromtz-lab/ts-py-anchor-guard@v0    # floating major: follows the newest 0.x
 ```
 
 **Measured from outside, once.** Everything above runs `uses: ./`. Run `45852973521` pinned the

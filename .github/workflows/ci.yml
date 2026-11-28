@@ -13,7 +13,11 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
+      # fetch-depth: 0 mediria una ventana. 47 commits: las etiquetas que la guarda de
+      # version promete no caben en un clon superficial.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -44,7 +48,11 @@ jobs:
     # The action is the product's front door: if it is only tested by hand, it is not tested.
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 mediria una ventana. 47 commits: las etiquetas que la guarda de
+      # version promete no caben en un clon superficial.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: self-test de cada modulo a traves de la action
         uses: ./
         with:
