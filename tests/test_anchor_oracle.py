@@ -846,3 +846,172 @@ class OperadoresBooleanosTest(unittest.TestCase):
         self.assertEqual(recuento["evaluables"], 2)
         self.assertEqual(sum(recuento["por_causa"].values())
                          + len(recuento["con_entorno"]), len(recuento["no_evaluables"]))
+
+
+class ValoresPublicadosTest(unittest.TestCase):
+    """P17: `valores` is a second surface on the same walk, not a second walk.
+
+    A differential needs each anchor's *value*, and nothing in the census published one: it
+    published verdicts. Adding the surface inside the loop that already decides `evaluables` is
+    what keeps it orthogonal -- a second pass would be free to disagree with the first, and then
+    the receipt would carry two counts of the same population.
+    """
+
+    FUENTE = ('export const A = process.env.V || "d";\n'
+              'export const B = 2 + 3;\n'
+              'export const C = parseInt(process.env.N || "1", 10);\n')
+
+    def _censo(self, fuente: str, entorno=None):
+        from ts_py_anchor_guard.anchor_oracle import censo
+        motivos: dict = {}
+        return censo(extraer_anclas(fuente, motivos=motivos), motivos, entorno=entorno)
+
+    def test_hay_un_valor_por_evaluable_y_ninguno_de_mas(self):
+        recuento = self._censo(self.FUENTE, entorno={"V": "a", "N": "1"})
+        self.assertEqual(recuento["evaluables"], 2)
+        self.assertEqual(sorted(recuento["valores"]), ["A", "B"])
+        self.assertEqual(recuento["valores"]["A"], "a")
+        self.assertEqual(recuento["valores"]["B"], 5)
+
+    def test_publicar_valores_no_mueve_el_denominador(self):
+        """The falsifier of P17: any count that moves is a second population wearing a new name."""
+        recuento = self._censo(self.FUENTE, entorno={"V": "a", "N": "1"})
+        self.assertEqual(recuento["declaradas"], 3)
+        self.assertEqual(recuento["leidas"], 3)
+        self.assertEqual(sum(recuento["por_causa"].values())
+                         + len(recuento["con_entorno"]), len(recuento["no_evaluables"]))
+        self.assertEqual(recuento["evaluables"] + len(recuento["no_evaluables"]), 3)
+        self.assertEqual(len(recuento["valores"]), recuento["evaluables"])
+
+    def test_un_valor_sin_mapa_no_se_publica_por_omision(self):
+        """No map declared: the anchors that read one have no value, and `valores` says so."""
+        recuento = self._censo(self.FUENTE)
+        self.assertEqual(recuento["valores"], {"B": 5})
+
+
+class DiferencialTest(unittest.TestCase):
+    """P18/P19: the same SHA under two maps, and which anchors move.
+
+    Measured on `calcom/cal.com@ae027bb7` with its declared 60 variables: 26 anchors change value
+    and 38 do not, 26 + 38 = 64, both maps reading the same 64 anchors. The counts are the
+    property -- an anchor that reads nothing cannot move, and an anchor that moves must be
+    reading the thing that changed -- so the tests pin the mechanism rather than that pair.
+    """
+
+    FUENTE = ('export const VIVA = process.env.V || "d";\n'
+              'export const OTRA = process.env.W;\n'
+              'export const FIJA = 2 + 3;\n'
+              'export const TEXTO = "hola";\n')
+
+    def _recibo(self, base, destino, **kwargs):
+        from ts_py_anchor_guard.anchor_oracle import diferencial
+        motivos: dict = {}
+        anclas = extraer_anclas(self.FUENTE, motivos=motivos)
+        return diferencial(anclas, motivos, base, destino, fuente="x.ts", **kwargs)
+
+    def test_separa_lo_que_cambia_de_lo_que_no(self):
+        recibo = self._recibo({"V": "a", "W": "1"}, {"V": "b", "W": "1"})
+        self.assertEqual(recibo["comunes"], 4)
+        self.assertEqual(recibo["cambian"], 1)
+        self.assertEqual(recibo["invariantes"], 3)
+        self.assertEqual(recibo["cambian"] + recibo["invariantes"], recibo["comunes"])
+        self.assertEqual([f["ancla"] for f in recibo["filas"]], ["VIVA"])
+        self.assertEqual((recibo["filas"][0]["base"], recibo["filas"][0]["destino"]), ("a", "b"))
+
+    def test_ningun_ancla_que_lee_el_entorno_queda_invariante(self):
+        """Every anchor that names a variable changes when that variable's value changes."""
+        base = {"V": "a", "W": "1"}
+        destino = {"V": "a", "W": "2"}
+        recibo = self._recibo(base, destino)
+        self.assertEqual([f["ancla"] for f in recibo["filas"]], ["OTRA"])
+        # Y el recíproco: subir el mapa entero no mueve lo que no lee.
+        self.assertEqual(self._recibo(base, base)["cambian"], 0)
+
+    def test_la_direccion_se_invierte_y_el_conjunto_no_cambia(self):
+        """P19: the finding is a set of anchors; the direction is the reading, not the defect."""
+        ida = self._recibo({"V": "a", "W": "1"}, {"V": "b", "W": "2"})
+        vuelta = self._recibo({"V": "b", "W": "2"}, {"V": "a", "W": "1"})
+        self.assertEqual(sorted(f["ancla"] for f in ida["filas"]),
+                         sorted(f["ancla"] for f in vuelta["filas"]))
+        self.assertEqual([f["base"] for f in ida["filas"]], [f["destino"] for f in vuelta["filas"]])
+        self.assertEqual(ida["mapa_base"]["huella"], vuelta["mapa_destino"]["huella"])
+        self.assertIn("→", ida["direccion"])
+
+    def test_la_huella_identifica_el_mapa_y_no_su_orden(self):
+        from ts_py_anchor_guard.anchor_oracle import huella_de_mapa
+        self.assertEqual(huella_de_mapa({"A": "1", "B": None}), huella_de_mapa({"B": None, "A": "1"}))
+        self.assertNotEqual(huella_de_mapa({"A": "1"}), huella_de_mapa({"A": 1}))
+        self.assertNotEqual(huella_de_mapa({"A": "1"}), huella_de_mapa({"A": "1", "B": "2"}))
+        self.assertTrue(huella_de_mapa({}).startswith("sha1:"))
+
+    def test_lo_que_falta_en_uno_de_los_mapas_se_nombra_y_no_se_cuenta(self):
+        """An anchor unreadable without its key is not a difference in value: it is not read."""
+        recibo = self._recibo({}, {"V": "a", "W": "1"})
+        self.assertEqual(recibo["evaluables_base"], 2)   # las dos constantes, y sólo esas
+        self.assertEqual(recibo["evaluables_destino"], 4)
+        self.assertEqual(sorted(recibo["solo_en_destino"]), ["OTRA", "VIVA"])
+        self.assertEqual(recibo["solo_en_base"], [])
+        self.assertEqual(recibo["comunes"], 2)
+
+    def test_sin_anclas_comunes_no_se_mide(self):
+        from ts_py_anchor_guard.anchor_oracle import RC_NO_MEDIDO as NO_MEDIDO
+        fuente = "export const A = process.env.V;\n"
+        from ts_py_anchor_guard.anchor_oracle import diferencial
+        motivos: dict = {}
+        recibo = diferencial(extraer_anclas(fuente, motivos=motivos), motivos, {}, {},
+                             fuente="x.ts")
+        self.assertEqual(recibo["rc"], NO_MEDIDO)
+        self.assertEqual(recibo["causa"], "SIN_ANCLAS_EVALUABLES")
+
+    def test_el_cli_publica_la_deriva_y_el_veredicto_es_distinto_del_hecho(self):
+        """A difference is the measurement; only `--exigir-invariancia` turns it into a failure."""
+        import contextlib
+        import io
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as caja:
+            fuente = pathlib.Path(caja) / "x.ts"
+            fuente.write_text(self.FUENTE)
+            base = pathlib.Path(caja) / "base.json"
+            base.write_text(json.dumps({"V": "a", "W": "1"}))
+            destino = pathlib.Path(caja) / "destino.json"
+            destino.write_text(json.dumps({"V": "b", "W": "1"}))
+            argv = ["--fuente", str(fuente), "--entorno-base", str(base),
+                    "--entorno-destino", str(destino), "--json"]
+            with contextlib.redirect_stdout(io.StringIO()) as salida:
+                self.assertEqual(main(argv), RC_OK)
+            recibo = json.loads(salida.getvalue())
+            self.assertEqual(recibo["cambian"], 1)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(argv + ["--exigir-invariancia"]), RC_DIVERGE)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(argv[:2] + ["--entorno-base", str(base)]), RC_ARITY)
+            self.assertIsNone(os.environ.get("ENTORNO_DE_PRUEBA"))
+
+
+class CableadoDeLaActionTest(unittest.TestCase):
+    """An input that `action.yml` declares but never exports is a door with no handle.
+
+    The composite step reads `ENTRADA_*` from its `env:` block, so an input missing there is
+    accepted by the caller, reported by no one, and silently replaced by the shell's default.
+    """
+
+    def _yaml(self):
+        return (RAIZ / "action.yml").read_text()
+
+    def test_cada_entrada_declarada_llega_al_paso(self):
+        yml = self._yaml()
+        entradas = yml.split("\ninputs:\n", 1)[1].split("\noutputs:\n", 1)[0]
+        declaradas = re.findall(r"^  ([a-z][a-z0-9-]*):$", entradas, re.M)
+        self.assertGreaterEqual(len(declaradas), 10)
+        for nombre in declaradas:
+            self.assertIn(f"ENTRADA_{nombre.upper().replace('-', '_')}:", yml,
+                          f"la entrada `{nombre}` no se exporta al paso")
+
+    def test_cada_variable_exportada_es_una_entrada_declarada(self):
+        yml = self._yaml()
+        entradas = yml.split("\ninputs:\n", 1)[1].split("\noutputs:\n", 1)[0]
+        declaradas = {f"ENTRADA_{n.upper().replace('-', '_')}" for n in
+                      re.findall(r"^  ([a-z][a-z0-9-]*):$", entradas, re.M)}
+        exportadas = set(re.findall(r"ENTRADA_[A-Z_]+", yml))
+        self.assertEqual(exportadas - declaradas, set())

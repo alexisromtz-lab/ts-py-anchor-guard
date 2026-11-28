@@ -10,7 +10,9 @@ branding:
 
 inputs:
   check:
-    description: Which check to run — `anchor`, `embed` or `probe`.
+    description: >-
+      Which check to run — `anchor`, `census`, `diff`, `embed` or `probe`. `diff` reads the same
+      source under two deployments and reports the anchors whose value moves between them.
     required: true
   self-test:
     description: >-
@@ -72,13 +74,38 @@ inputs:
     description: '`embed`: the rectangle the engine actually uses, `X Y A H`. Omit to centre.'
     required: false
     default: ""
+  environment:
+    description: >-
+      `census`: JSON `{VARIABLE: "value"}` the source reads. Without it every `process.env` read is
+      a gap, because a deployment's value is not in the source.
+    required: false
+    default: ""
+  env-base:
+    description: >-
+      `diff`: JSON of the reference deployment — the map the destination is read against. Its
+      fingerprint goes on the receipt, so the delta names which side it came from.
+    required: false
+    default: ""
+  env-destino:
+    description: '`diff`: JSON of the deployment being compared with the reference.'
+    required: false
+    default: ""
+  exigir-invariancia:
+    description: >-
+      `diff`: an anchor whose value moves between the two maps exits 1 instead of 0. Off by
+      default — moving from `staging` to `production` is a measurement, not necessarily a defect.
+    required: false
+    default: "false"
 
 outputs:
   rc:
     description: The module's exit code, propagated unchanged.
     value: ${{ steps.medir.outputs.rc }}
   receipt:
-    description: The JSON receipt the module printed, one line.
+    description: >-
+      The receipt, one line. Under 2 KiB by construction: a receipt that would be longer is
+      summarised — counts and the finding kept, large tables reduced to their size and names — and
+      `bytes` says how big the whole one was. Set `receipt-file` to keep it in full.
     value: ${{ steps.medir.outputs.receipt }}
 
 runs:
@@ -102,6 +129,10 @@ runs:
         ENTRADA_WINDOW: ${{ inputs.window }}
         ENTRADA_RECT: ${{ inputs.rect }}
         ENTRADA_RECEIPT_FILE: ${{ inputs.receipt-file }}
+        ENTRADA_ENVIRONMENT: ${{ inputs.environment }}
+        ENTRADA_ENV_BASE: ${{ inputs.env-base }}
+        ENTRADA_ENV_DESTINO: ${{ inputs.env-destino }}
+        ENTRADA_EXIGIR_INVARIANCIA: ${{ inputs.exigir-invariancia }}
         GUARDA: ${{ github.action_path }}
       run: |
         # `shell: bash` in a composite action is `bash -e`, so every statement below would abort
@@ -123,10 +154,12 @@ runs:
 
         case "$ENTRADA_CHECK" in
           anchor) modulo=anchor_oracle ;;
+          census) modulo=anchor_oracle ;;
+          diff)   modulo=anchor_oracle ;;
           embed)  modulo=viewport_embed ;;
           probe)  modulo=subpixel_probe ;;
           *)
-            rechazar "check desconocido '$ENTRADA_CHECK' (anchor|embed|probe)"
+            rechazar "check desconocido '$ENTRADA_CHECK' (anchor|census|diff|embed|probe)"
             ;;
         esac
 
@@ -137,6 +170,26 @@ runs:
           args=(--self-test)
         else
           case "$ENTRADA_CHECK" in
+            census)
+              if [ -z "$ENTRADA_SOURCE" ]; then
+                rechazar "check=census needs source"
+              fi
+              args+=(--fuente "$ENTRADA_SOURCE" --censo)
+              if [ -n "$ENTRADA_ENVIRONMENT" ]; then
+                args+=(--entorno "$ENTRADA_ENVIRONMENT")
+              fi
+              ;;
+            diff)
+              if [ -z "$ENTRADA_SOURCE" ] || [ -z "$ENTRADA_ENV_BASE" ] ||
+                 [ -z "$ENTRADA_ENV_DESTINO" ]; then
+                rechazar "check=diff needs source, env-base and env-destino"
+              fi
+              args+=(--fuente "$ENTRADA_SOURCE" --entorno-base "$ENTRADA_ENV_BASE" \
+                     --entorno-destino "$ENTRADA_ENV_DESTINO")
+              if [ "$ENTRADA_EXIGIR_INVARIANCIA" = "true" ]; then
+                args+=(--exigir-invariancia)
+              fi
+              ;;
             anchor)
               if [ -n "$ENTRADA_MANIFEST" ]; then
                 # A manifest carries its own source, reference and mappings per pair: asking
@@ -182,6 +235,22 @@ runs:
         rc=$?
 
         printf '%s\n' "$salida"
+        # The receipt goes to the output *and* to the job summary, and both are surfaces a caller
+        # reads: a 34 KiB step summary is noise in every PR that runs this, and a 34 KiB single
+        # line is a truncation waiting for the first repository wider than this one. So the line is
+        # summarised to a bounded size -- counts and the finding kept, wide tables reduced to their
+        # size and names -- and the whole receipt is written to `receipt-file` when one is asked
+        # for. A self-test prints prose, not a receipt, so it crosses untouched: it is the wiring
+        # proof, and its length is the module's, not a caller's.
+        if [ "$ENTRADA_SELF_TEST" = 'true' ]; then
+          recibo=$(printf '%s' "$salida" | tr -d '\n')
+        else
+          recibo=$(printf '%s' "$salida" | PYTHONPATH="$GUARDA" python3 -m ts_py_anchor_guard._resumen)
+          rc_resumen=$?
+          if [ "$rc_resumen" -ne 0 ]; then
+            rechazar "el recibo no se pudo resumir (rc=$rc_resumen): no se publica una linea ilegible"
+          fi
+        fi
         # A self-test prints prose, not a receipt: labelling it json would lie in the UI.
         fence='```'
         if [ "$ENTRADA_SELF_TEST" = 'true' ]; then fence='```text'; else fence='```json'; fi
@@ -189,12 +258,15 @@ runs:
           echo "### ts-py-anchor-guard · $ENTRADA_CHECK"
           echo ''
           echo "$fence"
-          printf '%s\n' "$salida"
+          printf '%s\n' "$recibo"
           echo '```'
+          if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
+            echo ''
+            echo "Recibo completo en \`$ENTRADA_RECEIPT_FILE\`. El resumen de arriba conserva los"
+            echo "conteos y el hallazgo; \`bytes\` mide el recibo entero."
+          fi
         } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-        # One line, so a caller can read it without parsing the whole receipt.
-        recibo=$(printf '%s' "$salida" | tr -d '\n')
         destino="${GITHUB_OUTPUT:-/dev/null}"
         printf 'rc=%s\n' "$rc" >> "$destino"
         printf 'receipt=%s\n' "$recibo" >> "$destino"
@@ -202,11 +274,17 @@ runs:
         # Outputs do survive a failing step (measured, run 45842813192); this file is not a
         # workaround for that. It is here because a receipt is evidence worth keeping: an
         # artifact upload, or a reader coming back later, wants a file rather than the outputs
-        # of a step it can no longer re-run.
+        # of a step it can no longer re-run. The file carries the *whole* receipt -- the one the
+        # output line could not hold -- and the summary beside it, so the two cannot disagree
+        # about which is which.
         if [ -n "$ENTRADA_RECEIPT_FILE" ]; then
+          completo=$(printf '%s' "$salida" | tr -d '\n')
           {
             printf 'rc=%s\n' "$rc"
-            printf 'receipt=%s\n' "$recibo"
+            printf 'receipt=%s\n' "$completo"
+            if [ "$recibo" != "$completo" ]; then
+              printf 'resumen=%s\n' "$recibo"
+            fi
           } > "$ENTRADA_RECEIPT_FILE"
         fi
 

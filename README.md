@@ -361,6 +361,67 @@ mixed. Naming an operator must not become a licence to read past it:
 `test_la_frontera_del_acto_no_se_mueve` is the test for that, and the suite is at 171 tests with
 four mutants over this act, all dead.
 
+`0.9.5` adds the surface a differential needs, the differential, and the ceiling that lets either
+one leave the machine. The census publishes `valores` — one per evaluable, inside the same walk
+that already decided `evaluables` — and `--entorno-base` / `--entorno-destino` compare the same
+commit under two maps. On `calcom/cal.com@ae027bb7` with its 60 declared variables against the
+same 60 declared `null`: **26 of the 64** shared anchors change value and **38** do not, which is
+the whole population — 26 + 38 = 64, and nothing is read in one map and not the other.
+
+- **The map crosses the hop, and the value crosses with it.** `valores` is filled by the loop that
+  already classifies, not by a second pass over the anchors: two passes are free to disagree, and a
+  receipt carrying two counts of the same population is a receipt that cannot be used as evidence.
+  A `valores` with one entry too many or one too few is what `ao_valores_de_mas` and
+  `ao_valores_sin_poblacion` die to prevent.
+- **A difference is the finding, not a failure.** The differential exits `0` when it measured:
+  26 anchors that move between two deployments of one commit are the answer, not an error. Only
+  `--exigir-invariancia` turns movement into `1`, and the Action forwards it as
+  `exigir-invariancia` — a check that fails on *any* drift is a check a team turns off.
+- **An anchor read in neither map is not an invariant one.** `solo_en_base` / `solo_en_destino`
+  carry the anchors that appear in one reading and not the other, because `cambian + invariantes`
+  must equal `comunes` and nothing else: an anchor whose key the base map does not declare was
+  never compared, and counting it as agreeing is the false green over an unread anchor that this
+  tool exists to refuse.
+- **The fingerprint names the deployment.** `mapa_base` and `mapa_destino` carry `sha1:` over the
+  canonical JSON of the map, so key order in a file is not part of an identity and `{ancla: valor}`
+  alone can no longer say the value moved without saying under which map. Measured: nulo
+  `sha1:914291b3…`, texto `sha1:5da4f355…`.
+- **`null` declared and a key absent are different maps, and the fingerprint sees it.** They have
+  to be: `X` declared `null` evaluates, `X` absent refuses, and a fingerprint that ignored the
+  difference would attribute both readings to the same deployment.
+
+The ceiling is its own act, because a receipt that cannot leave the machine is not a result. The
+census of this file was **34 141 B as one line** and is now **1 031 B** (-97,0 %) with
+`evaluables`, `declaradas`, `cobertura` and `por_causa` intact; the differential is **2 000 B**
+and keeps the direction, both fingerprints and **15 of the 26** rows, saying `_resto: 11` for the
+ones that did not travel. `bytes` prices the receipt the line replaced, and `receipt-file` keeps it
+whole — `rc`, `receipt` and, when it differs, `resumen`, in one file that cannot claim to be the
+other.
+
+- **A list of rows travels as rows.** A differential's `filas` *is* the finding, and its width is
+  the same three key names repeated 26 times, not information: the summary spends those bytes once
+  on `columnas`, then on as many leading rows as fit, in the finding's own order. The first draft
+  collapsed the list to `{"n": 26}`, which is a receipt that says twenty-six things changed and
+  names none — `re_lista_sin_muestra` is that draft, preserved as a mutant.
+- **Nothing leaves without saying it was cut.** `_resto` counts the rows that did not travel and
+  `_resumido` names the keys a compressed node could not carry. A summary that looked like a
+  complete receipt would be the same lie as a green over zero anchors.
+- **A summariser that cannot read the receipt is a refusal.** `receipt` is published by the
+  summary and never by the raw receipt, so a step that could not summarise exits `20` instead of
+  publishing a line nobody can parse. The module's `--self-test` prints prose rather than a
+  receipt and crosses untouched: it is the wiring proof, and a summary of it would measure the
+  wrong subject.
+
+One defect of this act is worth keeping: the summary was installed and then overwritten by the
+line that predated it, so the first measurement reported a 34 150-byte "summary" and the ceiling
+looked satisfied by nothing. It was caught by replaying the `run:` block as the shell actually
+runs it — `bash --noprofile --norc -e -o pipefail` — and by checking the byte count of the line
+rather than the exit code of the step. The suite is at 189 tests with ten mutants over this act,
+each one dead by a test of its own module — `bytes` pricing the compressed object instead of the
+published line survived the first draft, because every receipt the suite fed in was canonical to
+both readings: `re_bytes_no_pesado` only dies against a receipt written the way `json.dumps` writes
+one, with the separators' spaces still in it.
+
 ## Use as a GitHub Action
 
 `action.yml` is a composite action. It runs the clone your workflow pinned, installs nothing,
@@ -382,23 +443,30 @@ and exits with the module's own code, so a divergence fails the step instead of 
 
 | input | default | applies to | meaning |
 |---|---|---|---|
-| `check` | — | all | `anchor` · `embed` · `probe` |
+| `check` | — | all | `anchor` · `census` · `diff` · `embed` · `probe` |
 | `self-test` | `false` | all | run the module's own `--self-test` instead of measuring a subject |
 | `source` | — | `anchor` | the TypeScript file to read |
 | `reference` | — | `anchor` | the JSON file with the anchors to compare |
 | `manifest` | — | `anchor` | a versioned manifest of signed correspondences; takes the place of `source` and `reference` |
 | `backend` | `auto` | `anchor` | `auto` · `node` · `estatico` — the reader's own spelling, forwarded verbatim |
+| `environment` | — | `census` | JSON `{VARIABLE: "valor"}`; `null` declares an absent variable, an omitted key refuses the read |
+| `env-base` | — | `diff` | the map the commit is read under as the base deployment |
+| `env-destino` | — | `diff` | the map of the deployment it is being moved to |
+| `exigir-invariancia` | `false` | `diff` | turn movement between the two maps into `rc 1`; absent, drift is a measurement |
 | `tolerance` | `0.0` | all | relative tolerance; the receipt still reports the residual |
 | `canvas` | — | `embed` | `W H` of the host canvas |
 | `window` | — | `embed` | `W H` of the sub-viewport |
 | `rect` | — | `embed` | `X Y W H` to check against; omitted means "compute it" |
-| `receipt-file` | — | all | also write `rc` and `receipt` to this file — evidence a later reader can re-open, and a failure's receipt is written too |
+| `receipt-file` | — | all | write the **whole** receipt here, with `rc` and — when the output line was summarised — `resumen` beside it. Evidence a later reader can re-open; a failure's receipt is written too |
 | `profile-a` / `profile-b` | — | `probe` | two whitespace-separated profile files |
 | `bands` | — | `probe` | band count, at least 3 and at least 32 samples each |
 | `max-shift` | — | `probe` | cap on the shift searched, in samples |
 
-Two outputs: `rc` (`0` · `1` · `2` · `20`, the same value the step exits with) and `receipt` (the
-whole JSON receipt collapsed to one line). A short human summary goes to `$GITHUB_STEP_SUMMARY`.
+Two outputs: `rc` (`0` · `1` · `2` · `20`, the same value the step exits with) and `receipt` — the
+receipt as **one line under 2 KiB by construction**, not as the whole thing. A receipt that would
+be longer is summarised (counts and the finding kept, wide tables reduced to their names) and
+`bytes` says how big the whole one was; set `receipt-file` to keep it. The same bounded text goes
+to `$GITHUB_STEP_SUMMARY`.
 
 A refusal at the boundary publishes the code and leaves `receipt` empty, because nothing was
 measured: run `45895456729` found that slot empty instead of reading `20`, since the script wrote

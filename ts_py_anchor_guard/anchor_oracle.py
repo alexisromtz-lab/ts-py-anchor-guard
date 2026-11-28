@@ -37,6 +37,7 @@ invocation.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -448,12 +449,18 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str],
     commit under another map is another census. A refusal it cannot lift stays in
     `con_entorno` and `causa_de` now names the *next* thing that stopped it, which is how the
     map's own yield is explained instead of asserted.
+
+    `valores` is the value itself, for exactly the anchors `evaluables` counts, taken from the
+    same evaluation that already decided they were evaluable -- not a second pass. Without it
+    a census can compare two environments only by their refusals, which is the same census
+    twice; with it, the object a deployment changes is on the receipt.
     """
     evaluables, fallos, cache, con_entorno, causas = [], {}, {}, {}, {}
+    valores: dict[str, object] = {}
     for nombre, ancla in anclas.items():
         try:
             if ancla["tipo"] == "const":
-                evaluar(anclas, nombre, cache=cache, entorno=entorno)
+                valores[nombre] = evaluar(anclas, nombre, cache=cache, entorno=entorno)
             else:
                 _tokenizar(_AS_CONST.sub("", ancla["cuerpo"]))
         except (FuenteIlegible, ArithmeticError, TypeError, ValueError) as fallo:
@@ -479,8 +486,98 @@ def censo(anclas: dict[str, dict], motivos: dict[str, str],
             "estructurales": len(fallos) - len(con_entorno),
             "por_causa": dict(sorted(por_causa.items())),
             "causa_de": dict(sorted(causas.items())),
+            "valores": dict(sorted(valores.items())),
             "no_leidas": dict(sorted(motivos.items())),
             "no_evaluables": dict(sorted(fallos.items()))}
+
+
+def huella_de_mapa(mapa: dict) -> str:
+    """One string that names a deployment: the canonical JSON of the declared map, sha1.
+
+    Two maps that differ in a key, a value or a `null` against a string cannot share it, which
+    is what makes a differential receipt attributable: `{ancla: valor}` alone says the value
+    moved, and the fingerprint says which map moved it. Canonical form means key order and
+    whitespace in the file are not part of the identity -- the map, not its formatting.
+    """
+    canon = json.dumps(mapa, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "sha1:" + hashlib.sha1(canon.encode("utf-8")).hexdigest()
+
+
+def _mismo_valor(a, b) -> bool:
+    """Whether two evaluated values are the same value, not merely `==`.
+
+    `True == 1` and `1 == 1.0` in Python; in JavaScript the first is a type error of reading
+    and the second is the same number. So booleans compare only against booleans, numbers
+    compare numerically, and `NaN` -- which never equals itself -- compares equal to `NaN`
+    because the same expression under the same map is the same value twice.
+    """
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+            return True
+        return a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_mismo_valor(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_mismo_valor(a[k], b[k]) for k in a)
+    return type(a) is type(b) and a == b
+
+
+def diferencial(anclas: dict[str, dict], motivos: dict[str, str],
+                base: dict[str, str | None], destino: dict[str, str | None],
+                *, nombre_base: str = "base", nombre_destino: str = "destino",
+                fuente: str | None = None) -> dict:
+    """The same source, the same commit, two deployments: which anchors move.
+
+    A census under one map describes one deployment, and reading the source cannot tell the two
+    apart -- the SHA is identical. What changes between staging and production is the value the
+    map decides, so the differential is `censo(A).valores` against `censo(B).valores` on the
+    *same* anchors: an anchor whose value moves is a constant that two deployments disagree on,
+    and one that does not move is a constant that is safe to hard-code.
+
+    The receipt is directional on purpose. `nombre_base`/`nombre_destino` name the deployments
+    and `huella_de_mapa` fingerprints each map, because a delta with no origin cannot say which
+    side drifted, and two different maps would otherwise produce indistinguishable receipts. The
+    set of moved anchors is symmetric -- a value either differs or it does not -- so only the
+    reading of the delta (which side is the reference) depends on the direction.
+
+    Only the moved anchors are listed. The invariant ones are counted, not printed: a receipt
+    that reprinted all 64 values twice would be the census twice over, and it would put a large
+    payload on the one line a CI job has to read. `filas` is the finding; `invariantes` is the
+    denominator that keeps it honest.
+    """
+    censo_base = censo(anclas, motivos, entorno=base)
+    censo_destino = censo(anclas, motivos, entorno=destino)
+    valores_base, valores_destino = censo_base["valores"], censo_destino["valores"]
+    comunes = sorted(set(valores_base) & set(valores_destino))
+    filas = [{"ancla": n, "base": valores_base[n], "destino": valores_destino[n]}
+             for n in comunes if not _mismo_valor(valores_base[n], valores_destino[n])]
+    recibo = {
+        "rc": RC_OK,
+        "direccion": f"{nombre_base}→{nombre_destino}",
+        "fuente": fuente,
+        "mapa_base": {"nombre": nombre_base, "huella": huella_de_mapa(base),
+                      "claves": len(base)},
+        "mapa_destino": {"nombre": nombre_destino, "huella": huella_de_mapa(destino),
+                         "claves": len(destino)},
+        "evaluables_base": censo_base["evaluables"],
+        "evaluables_destino": censo_destino["evaluables"],
+        "comunes": len(comunes),
+        "cambian": len(filas),
+        "invariantes": len(comunes) - len(filas),
+        "solo_en_base": sorted(set(valores_base) - set(valores_destino)),
+        "solo_en_destino": sorted(set(valores_destino) - set(valores_base)),
+        "filas": filas,
+    }
+    # A differential over zero shared anchors is arithmetic over an empty set: it would report
+    # `cambian: 0` and read as "both deployments agree", which is the false green this tool
+    # exists to refuse. Same guard as `comparar` over an empty reference.
+    if not comunes:
+        recibo.update({"rc": RC_NO_MEDIDO, "causa": "SIN_ANCLAS_EVALUABLES",
+                       "detalle": "ninguna ancla tiene valor bajo los dos mapas: el "
+                                  "diferencial no midio nada"})
+    return recibo
 
 
 def _mapa_declarado(texto: str, origen: str):
@@ -1415,6 +1512,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="un ancla declarada que nadie midio es un hueco, no un verde")
     parser.add_argument("--entorno", help="JSON {VARIABLE: \"valor\"} con el entorno que la "
                                          "fuente lee: sin el mapa, cada lectura es un hueco")
+    parser.add_argument("--entorno-base", help="JSON del despliegue de referencia: el mapa "
+                                               "contra el que se lee el diferencial")
+    parser.add_argument("--entorno-destino", help="JSON del despliegue que se compara con la "
+                                                  "referencia: el otro lado del diferencial")
+    parser.add_argument("--exigir-invariancia", dest="exigir_invariancia", action="store_true",
+                        help="que un ancla cambie de valor entre los dos mapas es RC 1, no "
+                             "solo un dato del recibo")
     args = parser.parse_args(argv)
     if args.self_test:
         return _autotest()
@@ -1441,6 +1545,53 @@ def main(argv: list[str] | None = None) -> int:
         except InsumoFalta as exc:
             return None, ("INSUMO_FALTA", str(exc))
 
+    if args.entorno_base or args.entorno_destino:
+        # A differential with one side is not a differential: it would publish the census of a
+        # single deployment under a name that promises a comparison.
+        if not (args.entorno_base and args.entorno_destino):
+            print("uso: --entorno-base y --entorno-destino van juntos", file=sys.stderr)
+            return RC_ARITY
+        if args.censo or args.entorno:
+            print("uso: el diferencial toma --entorno-base y --entorno-destino, y no comparte "
+                  "--censo ni --entorno: son dos lecturas distintas", file=sys.stderr)
+            return RC_ARITY
+        if not args.fuente:
+            print("uso: anchor_oracle.py --fuente F.ts --entorno-base A.json "
+                  "--entorno-destino B.json [--json]", file=sys.stderr)
+            return RC_ARITY
+        try:
+            texto_diff = leer_texto(args.fuente, "fuente")
+            mapa_base, fallo = _mapa_declarado(
+                leer_texto(args.entorno_base, "entorno-base"), args.entorno_base)
+            if fallo:
+                return no_medido(*fallo)
+            mapa_destino, fallo = _mapa_declarado(
+                leer_texto(args.entorno_destino, "entorno-destino"), args.entorno_destino)
+            if fallo:
+                return no_medido(*fallo)
+        except InsumoFalta as exc:
+            return no_medido("INSUMO_FALTA", str(exc))
+        motivos_diff: dict[str, str] = {}
+        anclas_diff = extraer_anclas(texto_diff, motivos_diff)
+        recibo = diferencial(anclas_diff, motivos_diff, mapa_base, mapa_destino,
+                             nombre_base=args.entorno_base,
+                             nombre_destino=args.entorno_destino, fuente=args.fuente)
+        if recibo["rc"] == RC_OK and args.exigir_invariancia and recibo["cambian"]:
+            recibo["rc"] = RC_DIVERGE
+            recibo["causa"] = "DERIVA_ENTRE_MAPAS"
+        if args.json:
+            print(json.dumps(recibo, indent=2, sort_keys=True))
+        elif recibo["rc"] == RC_NO_MEDIDO:
+            print(f"NO_MEDIDO · {recibo['causa']} · {recibo['detalle']}")
+        else:
+            veredicto = "DERIVA" if recibo["cambian"] else "INVARIANTE"
+            print(f"{veredicto} · {recibo['direccion']} · {recibo['cambian']} de "
+                  f"{recibo['comunes']} cambian · {recibo['invariantes']} invariante(s) · "
+                  f"{recibo['mapa_base']['huella'][:19]} → "
+                  f"{recibo['mapa_destino']['huella'][:19]}")
+            for fila in recibo["filas"]:
+                print(f"CAMBIA {fila['ancla']} · {fila['base']!r} → {fila['destino']!r}")
+        return recibo["rc"]
     if args.censo:
         if not args.fuente:
             print("uso: anchor_oracle.py --fuente F.ts --censo [--json]", file=sys.stderr)
