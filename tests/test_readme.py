@@ -124,6 +124,34 @@ class EtiquetaDelReadmeTest(unittest.TestCase):
             f"etiquetas cuyo arbol no declara la version que su nombre promete: {mentirosas}",
         )
 
+    def test_la_etiqueta_exacta_lleva_fecha_y_el_puntero_no(self) -> None:
+        """The object type is part of the promise: `v0.8.0` was lightweight and `v` was not.
+
+        An annotated exact tag carries the release date, which is what makes it immutable; a
+        floating pointer moves by definition, so a date of its own becomes a lie the day it moves.
+        """
+        self._exigir_arbol_git()
+        exactas = [
+            t
+            for t in _git("tag", "--list", "v*").stdout.split()
+            if re.fullmatch(r"v\d+\.\d+\.\d+", t)
+        ]
+        self.assertTrue(exactas, "no hay etiquetas exactas: la guarda seria un verde vacio")
+        for tag in exactas:
+            self.assertEqual(
+                _git("cat-file", "-t", f"refs/tags/{tag}").stdout.strip(),
+                "tag",
+                f"`{tag}` es ligera: un release sin fecha propia no se distingue de un pin movido",
+            )
+        mayores = sorted(t for t in _git("tag", "--list").stdout.split() if re.fullmatch(r"v\d*", t))
+        self.assertTrue(mayores, "no hay puntero mayor en el repositorio: nada que medir")
+        for mayor in mayores:
+            self.assertEqual(
+                _git("cat-file", "-t", f"refs/tags/{mayor}").stdout.strip(),
+                "commit",
+                f"`{mayor}` es anotada: flota, y al moverse arrastra una fecha que ya no es cierta",
+            )
+
     def test_el_lector_ve_y_discrimina(self) -> None:
         """Un lector que no distingue una cita de otra no mide: se mide a si mismo."""
         self.assertEqual(_cita_de("@v0.9.8"), "0.9.8")

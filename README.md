@@ -484,7 +484,7 @@ One number this act does not explain, and publishes instead of smoothing: the pe
 Summed, the 93 rows cost `902,4 s` under 3.9.6 and `3 334,5 s` under 3.14.8, and the suite going from
 `91,4 s` to `101,5 s` does not account for the difference. It is reported as measured, not attributed.
 
-The suite is at **204 tests**; the seven
+The suite is at **205 tests**; the seven
 that pin this act are in `tests/test_mutate.py`, and they were checked the way the harness checks
 its subjects: with the row ordering removed, the order test fails (`['sp_borde_izq', 've_sin_recorte']`
 inverted); with `as_completed` read as `futuros.items()`, it cannot fail at all, which is why that
@@ -684,6 +684,27 @@ positive inputs with no `backend` declared returned `0` from `auto`, which selec
 a record of what happened, and `consumers/v0/` — byte-identical to what ran — as the reproducible
 artifact, with its `README.md` saying how to push it to a repository of your own in four commands.
 
+## Fixed scope: one audit, then the same step in every pull request
+
+Two questions no linter in either language answers, and both are answered by pairs you declare
+rather than by opinion: a constant that a port rescaled (`check: anchor`, exact by default), and
+a value that moves between two deployments of one source (`check: diff` with
+`exigir-invariancia: true`). The step exits `1` naming the pair that broke, `2` when it could
+not measure, `0` only when every declared pair holds inside its tolerance.
+
+```yaml
+- uses: alexisromtz-lab/ts-py-anchor-guard@v0.9.8
+  with:
+    check: anchor
+    manifest: contracts/anchors.json    # the pairs you signed off
+    receipt-file: guard-receipt.txt     # survives the red step
+```
+
+Run it once over the pairs you have, keep the receipt, and leave the same step in the pull
+request that would reintroduce the drift. A fixed-scope audit of one repository — the pairs
+declared, measured, and the receipt that outlives the failure — is quoted per project: open an
+issue on this repository with the stack (Python + TypeScript) and the paths involved.
+
 ## `anchor_oracle`: exact arithmetic parity
 
 Reads the declaration subset where exact comparison is meaningful — numeric constants,
@@ -763,8 +784,17 @@ is mostly an interface to an environment that is not here, so `--censo` names th
 population apart instead of filing it with the reader's own gaps — the three parts publish
 the denominator: 118 = 38 evaluable + 60 environment-bound + 20 structural.
 
+A fourth subject, held out and never used to teach the reader: `BerriAI/litellm@ccb97776`, four
+`constants.ts` files under `litellm/ui/litellm-dashboard/src/` (**2 654 + 1 059 + 1 167 + 1 105
+bytes**). The reader returns **16 of 16** declarations and evaluates **10 (62,5 %)**, with
+**0** environment-bound and **6** structural — four literals that do not tokenise into a value
+(three shell commands in backticks, one mapped type) and two names that resolve to nothing
+(`googleLogo.src`, `new`). Every file closes its denominator. The lower share is the subject and
+not the reader: these files are menus and command templates, and a template is text until
+something substitutes into it.
+
 The tempting next step was to teach the reader `!`, `||`, `&&` and `true`/`false`, which it
-does not support. That was pre-registered against these two files with a prediction of 38 →
+does not support. That was pre-registered against the calcom and immich files with a prediction of 38 →
 70-90 evaluable on calcom, and it is **refuted before writing a line**: teaching operators
 moves almost nothing, because the same declarations that use `||` also read
 `process.env.WEBAPP_URL`. The operator surface is not the binding constraint and the
